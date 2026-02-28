@@ -6,9 +6,9 @@ editor. The curve maps normalised step positions [0, 1] to normalised sigma
 values [0, 1], which are then scaled by max_sigma.
 
 Interpolation modes:
-  "smooth"  – Cardinal / Hermite spline with per-point tension weights.
-                w = 0 → Catmull-Rom-like tangents (maximum smoothness)
-                w = 1 → zero tangents (flat at each control point)
+  "smooth"  – NURBS cubic (order 4) with clamped knot vector and per-point
+              rational weights. w=1 → standard B-Spline (approximating);
+              w>1 → curve is pulled closer to the control point.
   "linear"  – Piecewise linear between control points.
 """
 
@@ -21,86 +21,148 @@ from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
 
 
-# ─── Hermite spline mathematics ──────────────────────────────────────────────
+# ─── NURBS mathematics ──────────────────────────────────────────────────────
 
-def _compute_tangents(
+_NURBS_DEGREE = 3
+_NURBS_TABLE_SIZE = 500
+
+
+def _nurbs_knot_vector(n_pts: int, degree: int) -> list[float]:
+    """
+    Build a clamped (open) uniform knot vector for ``n_pts`` control points
+    and the given ``degree``.
+
+    Returns a list of length ``n_pts + degree + 1`` with the first and last
+    ``degree + 1`` values clamped to 0 and 1 respectively.
+    """
+    order = degree + 1
+    n_knots = n_pts + order
+    if n_pts <= degree:
+        return [0.0] * n_knots
+
+    knots: list[float] = []
+    # Clamped start
+    for _ in range(order):
+        knots.append(0.0)
+    # Interior knots (uniform)
+    n_interior = n_pts - degree
+    for i in range(1, n_interior):
+        knots.append(i / n_interior)
+    # Clamped end
+    for _ in range(order):
+        knots.append(1.0)
+    return knots
+
+
+def _nurbs_basis(knots: list[float], n_pts: int, degree: int, u: float) -> list[float]:
+    """
+    Evaluate all B-spline basis functions N_{i,degree}(u) using the iterative
+    Cox–de Boor algorithm.
+
+    Returns a list of ``n_pts`` basis values.
+    """
+    # Clamp u to valid range
+    u = max(knots[degree], min(knots[n_pts], u))
+    # Handle exact endpoint
+    if u >= knots[n_pts]:
+        u = knots[n_pts] - 1e-10
+
+    # Degree 0
+    N = [0.0] * (len(knots) - 1)
+    for i in range(len(N)):
+        if knots[i] <= u < knots[i + 1]:
+            N[i] = 1.0
+
+    # Build up to target degree
+    for p in range(1, degree + 1):
+        N_new = [0.0] * len(N)
+        for i in range(len(N) - p):
+            d1 = knots[i + p] - knots[i]
+            d2 = knots[i + p + 1] - knots[i + 1]
+            c1 = ((u - knots[i]) / d1 * N[i]) if d1 > 0 else 0.0
+            c2 = ((knots[i + p + 1] - u) / d2 * N[i + 1]) if d2 > 0 else 0.0
+            N_new[i] = c1 + c2
+        N = N_new
+
+    return N[:n_pts]
+
+
+def _nurbs_evaluate(
     points: list[list[float]],
     weights: list[float],
-) -> list[float]:
+    knots: list[float],
+    degree: int,
+    u: float,
+) -> tuple[float, float]:
     """
-    Compute tangent slopes (dy/dx) for a Cardinal spline at every control point.
+    Evaluate the rational NURBS curve at parameter ``u``.
 
-    Each point has an independent weight ``w_i`` ∈ [0, 1] that scales its
-    tangent: ``a_i = 1 - w_i``.  Interior tangents use centripetal
-    Catmull-Rom weighting; boundary points use a one-sided difference.
-
-    Args:
-        points:  Sorted list of [x, y, w] (or [x, y]) pairs with x, y ∈ [0, 1].
-        weights: Per-point tension weights ∈ [0, 1].  w=0 → full tangent;
-                 w=1 → zero tangent.
-
-    Returns:
-        List of tangent values (dy/dx), one per control point.
+    Returns (x, y) on the curve.
     """
-    n = len(points)
-    ts = [0.0] * n
+    n_pts = len(points)
+    N = _nurbs_basis(knots, n_pts, degree, u)
 
-    for i in range(n):
-        wi = weights[i] if i < len(weights) else 0.0
-        a  = 1.0 - wi  # per-point scale
+    wx = 0.0
+    wy = 0.0
+    w_sum = 0.0
+    for i in range(n_pts):
+        nw = N[i] * weights[i]
+        wx += nw * points[i][0]
+        wy += nw * points[i][1]
+        w_sum += nw
 
-        if i == 0:
-            # First point always has a horizontal tangent (ts[0] stays 0)
-            pass
+    if w_sum == 0.0:
+        return (0.0, 0.0)
+    return (wx / w_sum, wy / w_sum)
 
-        elif i == n - 1:
-            # Backward difference at the last point
-            dx = points[-1][0] - points[-2][0]
-            if dx > 0:
-                ts[i] = a * (points[-1][1] - points[-2][1]) / dx
 
+def _nurbs_build_table(
+    points: list[list[float]],
+    weights: list[float],
+    knots: list[float],
+    degree: int,
+    n_samples: int = _NURBS_TABLE_SIZE,
+) -> tuple[list[float], list[float]]:
+    """
+    Pre-sample the NURBS curve into a lookup table of (x, y) pairs.
+    """
+    xs: list[float] = []
+    ys: list[float] = []
+    for i in range(n_samples + 1):
+        u = i / n_samples
+        x, y = _nurbs_evaluate(points, weights, knots, degree, u)
+        xs.append(x)
+        ys.append(y)
+    return xs, ys
+
+
+def _table_lookup_y(xs: list[float], ys: list[float], target_x: float) -> float:
+    """
+    Given a pre-sampled table, find y at ``target_x`` via binary search and
+    linear interpolation.
+    """
+    n = len(xs)
+    if n == 0:
+        return 0.0
+    if target_x <= xs[0]:
+        return ys[0]
+    if target_x >= xs[-1]:
+        return ys[-1]
+
+    # Binary search
+    lo, hi = 0, n - 1
+    while lo < hi - 1:
+        mid = (lo + hi) // 2
+        if xs[mid] <= target_x:
+            lo = mid
         else:
-            # Interior: centripetal Catmull-Rom weighted average
-            dx1 = points[i][0]     - points[i - 1][0]
-            dx2 = points[i + 1][0] - points[i][0]
-            if dx1 > 0 and dx2 > 0:
-                dy1 = points[i][1]     - points[i - 1][1]
-                dy2 = points[i + 1][1] - points[i][1]
-                s1  = dy1 / dx1
-                s2  = dy2 / dx2
-                w1  = (dx1 * dx1 + dy1 * dy1) ** 0.25  # chord length ^ alpha=0.5
-                w2  = (dx2 * dx2 + dy2 * dy2) ** 0.25
-                w_sum = w1 + w2
-                if w_sum > 0:
-                    ts[i] = a * (s1 * w2 + s2 * w1) / w_sum
+            hi = mid
 
-    return ts
-
-
-def _hermite_segment(
-    y0: float, y1: float,
-    m0: float, m1: float,
-    h: float, t: float,
-) -> float:
-    """
-    Cubic Hermite interpolation on a single segment of x-width ``h``.
-
-    Args:
-        y0, y1: Y values at segment start / end.
-        m0, m1: Tangent slopes (dy/dx) at start / end.
-        h:      Segment x-width (x1 - x0).
-        t:      Local parameter ∈ [0, 1].
-
-    Returns:
-        Interpolated Y value (not clamped).
-    """
-    t2 = t * t
-    t3 = t2 * t
-    h00 = 2 * t3 - 3 * t2 + 1
-    h10 = t3 - 2 * t2 + t
-    h01 = -2 * t3 + 3 * t2
-    h11 = t3 - t2
-    return h00 * y0 + h10 * h * m0 + h01 * y1 + h11 * h * m1
+    dx = xs[hi] - xs[lo]
+    if dx == 0:
+        return ys[lo]
+    t = (target_x - xs[lo]) / dx
+    return ys[lo] + t * (ys[hi] - ys[lo])
 
 
 # ─── Universal curve sampler ──────────────────────────────────────────────────
@@ -116,10 +178,10 @@ def _sample_curve(
 
     Args:
         points:        Sorted list of [x, y, w] or [x, y] pairs (x, y ∈ [0, 1]).
-                       The optional third element ``w`` is the per-point tension
-                       weight used in smooth mode.
+                       The optional third element ``w`` is the NURBS weight
+                       (w=1 → standard B-Spline; w>1 → closer to the point).
         t:             Horizontal position to query.
-        interpolation: ``"smooth"`` → Hermite Cardinal spline;
+        interpolation: ``"smooth"`` → NURBS cubic spline;
                        ``"linear"`` → piecewise linear.
         tension:       Unused (kept for signature compatibility).
 
@@ -139,41 +201,39 @@ def _sample_curve(
     if t >= points[-1][0]:
         return float(points[-1][1])
 
-    # Locate the enclosing segment
-    seg = 0
-    for i in range(n - 1):
-        if points[i][0] <= t <= points[i + 1][0]:
-            seg = i
-            break
-
-    x0, y0 = float(points[seg][0]),     float(points[seg][1])
-    x1, y1 = float(points[seg + 1][0]), float(points[seg + 1][1])
-
-    if x1 == x0:
-        return y0
-
-    local_t = (t - x0) / (x1 - x0)  # ∈ [0, 1] within the segment
-    y_lin   = y0 + local_t * (y1 - y0)
-
+    # Linear mode
     if interpolation == "linear":
-        return float(y_lin)
+        seg = 0
+        for i in range(n - 1):
+            if points[i][0] <= t <= points[i + 1][0]:
+                seg = i
+                break
+        x0, y0 = float(points[seg][0]), float(points[seg][1])
+        x1, y1 = float(points[seg + 1][0]), float(points[seg + 1][1])
+        if x1 == x0:
+            return y0
+        local_t = (t - x0) / (x1 - x0)
+        return float(y0 + local_t * (y1 - y0))
 
-    # Cardinal Hermite spline (default / "smooth")
-    weights  = [float(p[2]) if len(p) > 2 else 0.0 for p in points]
-    tangents = _compute_tangents(points, weights)
-    h        = x1 - x0
-    result   = _hermite_segment(
-        y0, y1, tangents[seg], tangents[seg + 1], h, local_t
-    )
+    # NURBS smooth — use degree = min(3, n-1) so 3 points get quadratic, 4+ get cubic
+    # Endpoints always w=1 so interior weights create a meaningful differential
+    degree = min(_NURBS_DEGREE, n - 1)
+    weights = [
+        1.0 if (i == 0 or i == n - 1) else (float(p[2]) if len(p) > 2 else 1.0)
+        for i, p in enumerate(points)
+    ]
+    knots = _nurbs_knot_vector(n, degree)
+    xs, ys = _nurbs_build_table(points, weights, knots, degree)
+    result = _table_lookup_y(xs, ys, t)
     return float(max(0.0, min(1.0, result)))
 
 
 # ─── Node definition ──────────────────────────────────────────────────────────
 
 _DEFAULT_CURVE = json.dumps({
-    "points":        [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]],
+    "points":        [[0.0, 1.0, 1.0], [1.0, 0.0, 1.0]],
     "interpolation": "smooth",
-    "tension":       0.0,
+    "tension":       1.0,
 })
 
 
@@ -195,9 +255,9 @@ class NKDSigmaCurve(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="NKDSigmaCurve",
+            node_id="NKDSigmasCurve",
             display_name="NKD Sigmas Curve",
-            category="sampling/custom_sampling/schedulers",
+            category="NKD Nodes/Sampling",
             description=(
                 "Control sigma values interactively with a spline curve. "
                 "Left-click to add points · Shift+click to remove · Drag to move."
@@ -256,15 +316,15 @@ class NKDSigmaCurve(io.ComfyNode):
         # ── Parse and validate curve JSON ──────────────────────────────────
         try:
             data = json.loads(curve_data)
-            raw_points    = data.get("points", [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
+            raw_points    = data.get("points", [[0.0, 1.0, 1.0], [1.0, 0.0, 1.0]])
             interpolation = str(data.get("interpolation", "smooth"))
-            tension       = float(data.get("tension", 0.0))
+            tension       = float(data.get("tension", 1.0))
         except (json.JSONDecodeError, ValueError, AttributeError):
-            raw_points    = [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+            raw_points    = [[0.0, 1.0, 1.0], [1.0, 0.0, 1.0]]
             interpolation = "smooth"
             tension       = 0.0
 
-        tension = max(0.0, min(1.0, tension))
+        tension = max(1.0, min(10.0, tension))
 
         # Remap legacy bspline mode
         if interpolation == "bspline":
@@ -276,13 +336,13 @@ class NKDSigmaCurve(io.ComfyNode):
             try:
                 px = max(0.0, min(1.0, float(p[0])))
                 py = max(0.0, min(1.0, float(p[1])))
-                pw = max(0.0, min(1.0, float(p[2]))) if len(p) > 2 else 0.0
+                pw = max(1.0, min(10.0, float(p[2]))) if len(p) > 2 else 1.0
                 points.append([px, py, pw])
             except (IndexError, TypeError, ValueError):
                 continue
 
         if len(points) < 2:
-            points = [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+            points = [[0.0, 1.0, 1.0], [1.0, 0.0, 1.0]]
 
         # Sort by X so segments are well-defined
         points.sort(key=lambda p: p[0])
@@ -316,9 +376,9 @@ async def comfy_entrypoint() -> NKDSigmaCurveExtension:
 # ─── Legacy mappings ──────────────────────────────────────────────────────────
 
 NODE_CLASS_MAPPINGS = {
-    "NKDSigmaCurve": NKDSigmaCurve,
+    "NKDSigmasCurve": NKDSigmaCurve,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "NKDSigmaCurve": "NKD Sigmas Curve",
+    "NKDSigmasCurve": "NKD Sigmas Curve",
 }

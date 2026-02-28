@@ -14,8 +14,8 @@ import { createApp } from "vue";
 import { app as comfyApp } from "../../scripts/app.js";
 import SigmaCurveWidget from "@/SigmaCurveWidget.vue";
 
-const NODE_NAME = "NKDSigmaCurve";
-const EXT_NAME  = "NKD.SigmaCurve.Vue";
+const NODE_NAME = "NKDSigmasCurve";
+const EXT_NAME  = "NKD.SigmasCurve.Vue";
 
 comfyApp.registerExtension({
   name: EXT_NAME,

@@ -14,16 +14,16 @@
 
         <div class="nkd-divider" />
 
-        <!-- Tension slider (smooth only) -->
+        <!-- Weight slider (smooth only) -->
         <div v-show="interpolation === 'smooth'" class="nkd-group">
-          <span class="nkd-label">Tensión</span>
+          <span class="nkd-label">Weight</span>
           <input
             v-model.number="tension"
-            type="range" min="0" max="1" step="0.01"
+            type="range" min="1" max="10" step="0.1"
             class="nkd-slider"
             @input="onTensionInput"
           />
-          <span class="nkd-mono">{{ tension.toFixed(2) }}</span>
+          <span class="nkd-mono">{{ tension.toFixed(1) }}</span>
         </div>
 
         <div class="nkd-spacer" />
@@ -31,14 +31,13 @@
         <!-- Reset button -->
         <button class="nkd-btn-reset" @click="resetCurve">↺</button>
 
-        <!-- Live info: steps + max_sigma (from external widgets) -->
-        <span class="nkd-info">S: {{ extSteps }} | σmax: {{ fmtSigma(extMaxSigma) }}</span>
-
       </div>
 
-      <!-- Row 2: hint -->
+      <!-- Row 2: hint + live info -->
       <div class="nkd-row nkd-row--hint">
-        <span class="nkd-hint">Click=añadir · Drag=mover · Shift+click=eliminar</span>
+        <span class="nkd-info">S: {{ extSteps }} | σmax: {{ fmtSigma(extMaxSigma) }}</span>
+        <div class="nkd-spacer" />
+        <span class="nkd-hint">Click=add · Drag=move · Shift+click=delete</span>
       </div>
     </div>
 
@@ -119,9 +118,9 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 let   ctx:       CanvasRenderingContext2D | null = null;
 let   dpr = 1;
 
-const points        = ref<Point[]>([[0, 1, 0], [1, 0, 0]]);
+const points        = ref<Point[]>([[0, 1, 1], [1, 0, 1]]);
 const interpolation = ref<"smooth" | "linear">("smooth");
-const tension       = ref(0.0);
+const tension       = ref(1.0);
 
 const dragIdx  = ref(-1);
 const hoverIdx = ref(-1);
@@ -167,56 +166,99 @@ function hitTest(lx: number, ly: number): number {
   return nearest;
 }
 
-// ── Hermite Cardinal spline ───────────────────────────────────────────────────
+// ── NURBS cubic spline ────────────────────────────────────────────────────────
 
-/** Extrae el array de pesos por punto (tercer elemento de cada punto). */
-function extractWeights(pts: Point[]): number[] {
-  return pts.map(p => Math.max(0, Math.min(1, p[2] ?? 0.0)));
+const NURBS_DEGREE = 3;
+const NURBS_TABLE_SIZE = 500;
+
+function nurbsKnotVector(nPts: number, degree: number): number[] {
+  const order = degree + 1;
+  const nKnots = nPts + order;
+  if (nPts <= degree) return new Array(nKnots).fill(0);
+
+  const knots: number[] = [];
+  for (let i = 0; i < order; i++) knots.push(0);
+  const nInterior = nPts - degree;
+  for (let i = 1; i < nInterior; i++) knots.push(i / nInterior);
+  for (let i = 0; i < order; i++) knots.push(1);
+  return knots;
 }
 
-/**
- * Tangentes centripetal Catmull-Rom con pesos por punto.
- * a_i = 1 - w_i  (w=0 → tangente completa; w=1 → tangente nula)
- */
-function computeTangents(pts: Point[], weights: number[]): number[] {
-  const n  = pts.length;
-  const ts = new Array<number>(n).fill(0);
+function nurbsBasis(knots: number[], nPts: number, degree: number, u: number): number[] {
+  u = Math.max(knots[degree], Math.min(knots[nPts], u));
+  if (u >= knots[nPts]) u = knots[nPts] - 1e-10;
 
-  for (let i = 0; i < n; i++) {
-    const a = 1.0 - (weights[i] ?? 0.0);
-
-    if (i === 0) {
-      // First point always has a horizontal tangent (ts[0] stays 0)
-    } else if (i === n - 1) {
-      const dx = pts[n - 1][0] - pts[n - 2][0];
-      if (dx > 0) ts[i] = a * (pts[n - 1][1] - pts[n - 2][1]) / dx;
-
-    } else {
-      const dx1 = pts[i][0]     - pts[i - 1][0];
-      const dx2 = pts[i + 1][0] - pts[i][0];
-      if (dx1 > 0 && dx2 > 0) {
-        const dy1 = pts[i][1]   - pts[i - 1][1];
-        const dy2 = pts[i + 1][1] - pts[i][1];
-        const s1  = dy1 / dx1;
-        const s2  = dy2 / dx2;
-        const w1   = Math.pow(dx1 * dx1 + dy1 * dy1, 0.25);
-        const w2   = Math.pow(dx2 * dx2 + dy2 * dy2, 0.25);
-        const wSum = w1 + w2;
-        ts[i] = wSum > 0 ? a * (s1 * w2 + s2 * w1) / wSum : 0;
-      }
-    }
+  const len = knots.length - 1;
+  let N = new Array(len).fill(0);
+  for (let i = 0; i < len; i++) {
+    if (knots[i] <= u && u < knots[i + 1]) N[i] = 1;
   }
-  return ts;
+
+  for (let p = 1; p <= degree; p++) {
+    const Nnew = new Array(len).fill(0);
+    for (let i = 0; i < len - p; i++) {
+      const d1 = knots[i + p] - knots[i];
+      const d2 = knots[i + p + 1] - knots[i + 1];
+      const c1 = d1 > 0 ? (u - knots[i]) / d1 * N[i] : 0;
+      const c2 = d2 > 0 ? (knots[i + p + 1] - u) / d2 * N[i + 1] : 0;
+      Nnew[i] = c1 + c2;
+    }
+    N = Nnew;
+  }
+  return N.slice(0, nPts);
 }
 
-function hermiteSegment(
-  y0: number, y1: number, m0: number, m1: number, h: number, t: number
-): number {
-  const t2 = t * t, t3 = t2 * t;
-  return (2 * t3 - 3 * t2 + 1) * y0
-       + (t3 - 2 * t2 + t)     * h * m0
-       + (-2 * t3 + 3 * t2)    * y1
-       + (t3 - t2)              * h * m1;
+function nurbsEvaluate(
+  pts: Point[], weights: number[], knots: number[], degree: number, u: number
+): [number, number] {
+  const nPts = pts.length;
+  const N = nurbsBasis(knots, nPts, degree, u);
+  let wx = 0, wy = 0, wSum = 0;
+  for (let i = 0; i < nPts; i++) {
+    const nw = N[i] * weights[i];
+    wx += nw * pts[i][0];
+    wy += nw * pts[i][1];
+    wSum += nw;
+  }
+  if (wSum === 0) return [0, 0];
+  return [wx / wSum, wy / wSum];
+}
+
+/** Pre-sample NURBS curve into a lookup table. */
+let cachedTable: { xs: number[]; ys: number[] } | null = null;
+
+function buildNurbsTableWithDegree(pts: Point[], weights: number[], degree: number): { xs: number[]; ys: number[] } {
+  const knots = nurbsKnotVector(pts.length, degree);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i <= NURBS_TABLE_SIZE; i++) {
+    const u = i / NURBS_TABLE_SIZE;
+    const [x, y] = nurbsEvaluate(pts, weights, knots, degree, u);
+    xs.push(x);
+    ys.push(y);
+  }
+  return { xs, ys };
+}
+
+function buildNurbsTable(pts: Point[], weights: number[]): { xs: number[]; ys: number[] } {
+  return buildNurbsTableWithDegree(pts, weights, NURBS_DEGREE);
+}
+
+function tableLookupY(xs: number[], ys: number[], targetX: number): number {
+  const n = xs.length;
+  if (n === 0) return 0;
+  if (targetX <= xs[0]) return ys[0];
+  if (targetX >= xs[n - 1]) return ys[n - 1];
+
+  let lo = 0, hi = n - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (xs[mid] <= targetX) lo = mid; else hi = mid;
+  }
+  const dx = xs[hi] - xs[lo];
+  if (dx === 0) return ys[lo];
+  const t = (targetX - xs[lo]) / dx;
+  return ys[lo] + t * (ys[hi] - ys[lo]);
 }
 
 // ── Universal sampler ─────────────────────────────────────────────────────────
@@ -231,29 +273,32 @@ function sampleCurve(t: number): number {
   if (t <= pts[0][0])     return pts[0][1];
   if (t >= pts[n - 1][0]) return pts[n - 1][1];
 
-  let seg = 0;
-  for (let i = 0; i < n - 1; i++) {
-    if (pts[i][0] <= t && t <= pts[i + 1][0]) { seg = i; break; }
+  // Linear mode
+  if (interpolation.value === "linear") {
+    let seg = 0;
+    for (let i = 0; i < n - 1; i++) {
+      if (pts[i][0] <= t && t <= pts[i + 1][0]) { seg = i; break; }
+    }
+    const [x0, y0] = pts[seg];
+    const [x1, y1] = pts[seg + 1];
+    if (x1 === x0) return y0;
+    const lt = (t - x0) / (x1 - x0);
+    return y0 + lt * (y1 - y0);
   }
 
-  const [x0, y0] = pts[seg];
-  const [x1, y1] = pts[seg + 1];
-  if (x1 === x0) return y0;
-
-  const lt   = (t - x0) / (x1 - x0);
-  const yLin = y0 + lt * (y1 - y0);
-
-  if (interpolation.value === "linear") return yLin;
-
-  // Hermite Cardinal (smooth) — pesos por punto
-  const weights = extractWeights(pts);
-  const ts      = computeTangents(pts, weights);
-  const h       = x1 - x0;
-  const result  = hermiteSegment(y0, y1, ts[seg], ts[seg + 1], h, lt);
+  // NURBS smooth — use degree = min(3, n-1) so 3 points get quadratic, 4+ get cubic
+  // Endpoints always w=1 so interior weights create a differential
+  const degree = Math.min(NURBS_DEGREE, n - 1);
+  const last = pts.length - 1;
+  const weights = pts.map((p, i) => (i === 0 || i === last) ? 1 : Math.max(1, p[2] ?? 1));
+  if (!cachedTable) cachedTable = buildNurbsTableWithDegree(pts, weights, degree);
+  const result = tableLookupY(cachedTable.xs, cachedTable.ys, t);
   return Math.max(0, Math.min(1, result));
 }
 
 // ── Mouse handlers ────────────────────────────────────────────────────────────
+
+function invalidateCache(): void { cachedTable = null; }
 
 function onDown(e: MouseEvent): void {
   const { x, y } = eventToLogical(e);
@@ -266,7 +311,7 @@ function onDown(e: MouseEvent): void {
     if (idx >= 0 && points.value.length > 2) {
       points.value.splice(idx, 1);
       hoverIdx.value = -1;
-      redraw(); emit();
+      invalidateCache(); redraw(); emit();
     }
     return;
   }
@@ -282,7 +327,7 @@ function onDown(e: MouseEvent): void {
     else           { points.value.splice(at, 0, newPt); dragIdx.value = at; }
     dragging.value = true;
     setCursor("grabbing");
-    redraw(); emit();
+    invalidateCache(); redraw(); emit();
   }
 }
 
@@ -297,7 +342,7 @@ function onMove(e: MouseEvent): void {
     pt[1] = fromCY(y);
     points.value.sort((a, b) => a[0] - b[0]);
     dragIdx.value = points.value.indexOf(pt);
-    redraw(); emit();
+    invalidateCache(); redraw(); emit();
     return;
   }
 
@@ -327,12 +372,12 @@ function setCursor(val: string): void {
 
 // ── Widget change handlers ────────────────────────────────────────────────────
 
-function onInterpChange(): void { redraw(); emit(); }
+function onInterpChange(): void { invalidateCache(); redraw(); emit(); }
 
 function onTensionInput(): void {
-  // Aplicar la tensión global a todos los puntos existentes uniformemente
+  // Apply global weight to all points
   points.value.forEach(p => { p[2] = tension.value; });
-  redraw(); emit();
+  invalidateCache(); redraw(); emit();
 }
 
 // ── Canvas rendering ──────────────────────────────────────────────────────────
@@ -345,7 +390,7 @@ function redraw(): void {
   drawAxisLabels();
   drawFill();
   drawCurve();
-  if (interpolation.value === "smooth") drawTangentHandles();
+  if (interpolation.value === "smooth") drawControlPolygon();
   drawPoints();
 }
 
@@ -356,59 +401,22 @@ function drawBg(): void {
   ctx!.fillRect(PAD.left, PAD.top, IW, IH);
 }
 
-// Smooth: tangent handles at each control point
-function drawTangentHandles(): void {
+// Smooth: draw control polygon (dashed lines between control points)
+function drawControlPolygon(): void {
   const pts = [...points.value].sort((a, b) => a[0] - b[0]);
   const n   = pts.length;
   if (n < 2) return;
 
-  const FRAC    = 0.33;
-  const MAX_LEN = 40;
-  const weights  = extractWeights(pts);
-  const tangents = computeTangents(pts, weights);
-
   ctx!.save();
-  ctx!.setLineDash([2, 3]);
-
-  pts.forEach((p, i) => {
-    const m = tangents[i];
-    if (Math.abs(m) < 1e-5) return;
-
-    const cx = toCanvasX(p[0]);
-    const cy = toCanvasY(p[1]);
-
-    const dLeft  = i > 0     ? cx - toCanvasX(pts[i - 1][0]) : Infinity;
-    const dRight = i < n - 1 ? toCanvasX(pts[i + 1][0]) - cx : Infinity;
-    const dNear  = Math.min(dLeft, dRight);
-    const dispLen = Math.max(4, Math.min(FRAC * dNear, MAX_LEN));
-
-    // Unit vector in canvas space
-    const vx   = IW, vy = -IH * m;
-    const vlen = Math.sqrt(vx * vx + vy * vy);
-    const ux   = (vx / vlen) * dispLen;
-    const uy   = (vy / vlen) * dispLen;
-
-    const isActive = i === dragIdx.value;
-    const isHover  = i === hoverIdx.value && !dragging.value;
-    const alpha = isActive ? 0.55 : isHover ? 0.45 : 0.25;
-
-    ctx!.strokeStyle = `rgba(74,180,255,${alpha})`;
-    ctx!.lineWidth   = isActive ? 1.5 : 1;
-    ctx!.beginPath();
-    ctx!.moveTo(cx - ux, cy - uy);
-    ctx!.lineTo(cx + ux, cy + uy);
-    ctx!.stroke();
-
-    ctx!.setLineDash([]);
-    ctx!.fillStyle = `rgba(74,180,255,${alpha + 0.2})`;
-    ([-1, 1] as const).forEach(sign => {
-      ctx!.beginPath();
-      ctx!.arc(cx + sign * ux, cy + sign * uy, 2.5, 0, Math.PI * 2);
-      ctx!.fill();
-    });
-    ctx!.setLineDash([2, 3]);
-  });
-
+  ctx!.setLineDash([3, 4]);
+  ctx!.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx!.lineWidth   = 1;
+  ctx!.beginPath();
+  ctx!.moveTo(toCanvasX(pts[0][0]), toCanvasY(pts[0][1]));
+  for (let i = 1; i < n; i++) {
+    ctx!.lineTo(toCanvasX(pts[i][0]), toCanvasY(pts[i][1]));
+  }
+  ctx!.stroke();
   ctx!.restore();
 }
 
@@ -456,7 +464,7 @@ function drawAxisLabels(): void {
   ctx!.font      = "8px sans-serif";
   ctx!.fillStyle = C.axisLabelDim;
   ctx!.textBaseline = "bottom";
-  ctx!.fillText("paso →", PAD.left + IW * 0.75, CH - 1);
+  ctx!.fillText("steps →", PAD.left + IW * 0.75, CH - 1);
   ctx!.save();
   ctx!.translate(8, PAD.top + IH / 2);
   ctx!.rotate(-Math.PI / 2);
@@ -469,7 +477,7 @@ function drawAxisLabels(): void {
 
 function buildPath(): void {
   ctx!.beginPath();
-  const S = 150;
+  const S = 300;
   for (let i = 0; i <= S; i++) {
     const t = i / S;
     const y = sampleCurve(t);
@@ -505,7 +513,7 @@ function drawPoints(): void {
   const lastIdx = sorted.length - 1;
 
   sorted.forEach((pt, sortedI) => {
-    const origI  = points.value.indexOf(pt);
+    const origI    = points.value.indexOf(pt);
     const isLocked = sortedI === 0 || sortedI === lastIdx;
     const isActive = !isLocked && origI === dragIdx.value;
     const isHover  = !isLocked && origI === hoverIdx.value && !dragging.value;
@@ -554,9 +562,12 @@ function deserialise(json: string): void {
       points.value = d.points.map((p: unknown[]) => {
         const x = Math.max(0, Math.min(1, parseFloat(p[0] as string)));
         const y = Math.max(0, Math.min(1, parseFloat(p[1] as string)));
-        const w = (p[2] !== undefined && p[2] !== null)
-                  ? Math.max(0, Math.min(1, parseFloat(p[2] as string)))
-                  : 0.0;
+        let   w = (p[2] !== undefined && p[2] !== null)
+                  ? parseFloat(p[2] as string)
+                  : 1.0;
+        // Legacy weights were in [0,1]; new weights are in [1,10]
+        if (w < 1.0) w = 1.0;
+        w = Math.min(10.0, w);
         return [x, y, w] as Point;
       });
       points.value.sort((a, b) => a[0] - b[0]);
@@ -571,26 +582,29 @@ function deserialise(json: string): void {
     } else if (d.interpolation === "linear") {
       interpolation.value = "linear";
     }
-    if (typeof d.tension === "number")
-      tension.value = Math.max(0, Math.min(1, d.tension));
-    redraw();
+    if (typeof d.tension === "number") {
+      // Legacy tension was [0,1]; new weight is [1,10]
+      let t = d.tension;
+      if (t < 1.0) t = 1.0;
+      tension.value = Math.min(10.0, t);
+    }
+    invalidateCache(); redraw();
   } catch { /* keep current state */ }
 }
 
 function resetCurve(): void {
-  points.value        = [[0, 1, 0], [1, 0, 0]];
+  points.value        = [[0, 1, 1], [1, 0, 1]];
   interpolation.value = "smooth";
-  tension.value       = 0.0;
-  redraw();
-  emit();
+  tension.value       = 1.0;
+  invalidateCache(); redraw(); emit();
 }
 
 defineExpose({ serialise, deserialise });
 
 function emit(): void { props.onChange?.(serialise()); }
 
-// Redraw when reactive state changes
-watch([interpolation, tension], redraw);
+// Redraw when reactive state changes — also invalidate NURBS cache
+watch([interpolation, tension], () => { invalidateCache(); redraw(); });
 // Redraw when external widget values change (live axis labels)
 watch([extSteps, extMaxSigma], redraw);
 
