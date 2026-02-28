@@ -290,11 +290,6 @@ class NKDSigmaCurve(io.ComfyNode):
         )
 
     @classmethod
-    def fingerprint_inputs(cls, **kwargs) -> float:
-        """Always re-execute — curve state may change interactively."""
-        return float("nan")
-
-    @classmethod
     def execute(
         cls,
         curve_data: str,
