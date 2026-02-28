@@ -12,14 +12,24 @@ It’s all about control. Standard schedulers (Karras, exponential, etc.) give y
 
 I’ve been using [Custom Sigma Editor](https://github.com/JoeNavark/comfyui_custom_sigma_editor.git) for months and I love it, but it’s not compatible with Nodes 2.0, so """I built""" (Claude did 🤫) my own version inspired by it.
 
-
 https://github.com/user-attachments/assets/ee3e5b04-c5ab-4c67-9840-fa64a70db6cd
 
 
 
-## Demo
+## My version 👇🏻
 
-https://github.com/user-attachments/assets/8b6d06e8-ce00-4119-9105-b4d228af56d9
+https://github.com/user-attachments/assets/281fa043-0900-4e7b-883d-1018953b01e0
+
+This is all with a fixed seed. As you can see, specially in the las 2 generations. Tuning the sigma curve lets you nail the shapes and details at just the right moment during generation. For instance, I use it to swap out a bare chest for a T-shirt on the fly.
+
+
+## How it works / How to use it
+
+- I **strongly, highly, super recommend using it alongside the [RES4LYF](https://github.com/ClownsharkBatwing/RES4LYF.git)** node pack (and joining the bongmath cult), but technically you could plug it into any sigmas input, like with a _CustomSampler_. 
+- The node overrides the scheduler and steps, so set the **Ksampler to 1.0 denoise control these from the Sigmas Curves node instead**.
+- If you know nothing about sigmas, treat the _max_sigma_ value as your new "denoise" setting (kind of).
+- The curve is your new "scheduler" (you're basically drawing it yourself instead of picking one from a dropdown).
+- You can choose between linear curve or b-spline type. Up to you.
 
 ## Features
 
@@ -30,30 +40,6 @@ https://github.com/user-attachments/assets/8b6d06e8-ce00-4119-9105-b4d228af56d9
   - **Linear** — Piecewise linear between control points
 - Outputs a standard `SIGMAS` tensor compatible with **all ComfyUI samplers**
 - No extra Python dependencies beyond what ComfyUI already includes
-
-## How it works
-
-The node embeds a canvas editor directly in the ComfyUI graph:
-
-- **X-axis** is the normalised step position (0 = first step, 1 = last step)
-- **Y-axis** is the normalised sigma magnitude (1 = `max_sigma`, 0 = 0)
-
-At generation time, the curve is sampled at `steps + 1` evenly-spaced positions and scaled by `max_sigma`, producing a standard `SIGMAS` tensor ready for any sampler node.
-
-## Inputs
-
-| Name | Type | Default | Description |
-|------|------|---------|-------------|
-| `steps` | INT | 20 | Number of sigma steps to generate (1-10000) |
-| `max_sigma` | FLOAT | 1.0 | Maximum sigma value, the top of the curve (y=1) maps to this |
-
-The curve shape is set interactively via the embedded canvas widget in the node itself.
-
-## Output
-
-| Name | Type | Description |
-|------|------|-------------|
-| `SIGMAS` | SIGMAS | Tensor of shape `(steps + 1,)`, last value is always `0.0` |
 
 ## Installation
 
