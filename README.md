@@ -10,7 +10,7 @@ A ComfyUI custom node that replaces trial-and-error sigma tuning with a visual, 
 
 It’s all about control. Standard schedulers (Karras, exponential, etc.) give you a fixed curve shape (nothing wrong with that) but once you unlock the power of custom sigmas, you can decide exactly how you want to denoise the image. That gives you fine-grained control over composition, details, and a bunch of nerdy stuff.
 
-I’ve been using "Custom Graph Sigma" for months and I love it, but it’s not compatible with Nodes 2.0, so I built my own version inspired by it.
+I’ve been using [Custom Sigma Editor](https://github.com/JoeNavark/comfyui_custom_sigma_editor.git) for months and I love it, but it’s not compatible with Nodes 2.0, so """I built""" (Claude did 🤫) my own version inspired by it.
 
 
 https://github.com/user-attachments/assets/ee3e5b04-c5ab-4c67-9840-fa64a70db6cd
