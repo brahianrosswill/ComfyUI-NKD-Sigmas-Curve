@@ -25,8 +25,8 @@ This is all with a fixed seed. As you can see, specially in the las 2 generation
 
 ## How it works / How to use it
 
-- I **strongly, highly, super recommend using it alongside the [RES4LYF](https://github.com/ClownsharkBatwing/RES4LYF.git)** node pack (and joining the bongmath cult), but technically you could plug it into any sigmas input, like with a _CustomSampler_. 
-- The node overrides the scheduler and steps, so set the **Ksampler to 1.0 denoise control these from the Sigmas Curves node instead**.
+- I **strongly, highly, super recommend using it alongside the [RES4LYF](https://github.com/ClownsharkBatwing/RES4LYF.git)** node pack (and joining the bongmath cult), but technically you could plug it into any sigmas input, like in a _CustomSampler_. 
+- The node overrides the scheduler and steps, so set the **Ksampler to 1.0 denoise and control these from the Sigmas Curves node instead**.
 - If you know nothing about sigmas, treat the _max_sigma_ value as your new "denoise" setting (kind of).
 - The curve is your new "scheduler" (you're basically drawing it yourself instead of picking one from a dropdown).
 - You can choose between linear curve or b-spline type. Up to you.
