@@ -41,6 +41,13 @@ This is all with a fixed seed. As you can see, specially in the las 2 generation
 - Outputs a standard `SIGMAS` tensor compatible with **all ComfyUI samplers**
 - No extra Python dependencies beyond what ComfyUI already includes
 
+## Updates
+
+Now it shows the progress in real time, so you can make better decisions 🫡
+
+https://github.com/user-attachments/assets/42c3c7af-4d89-43c1-bb6d-d623547c8e5d
+
+
 ## Installation
 
 ### Via ComfyUI Manager *(recommended)*
