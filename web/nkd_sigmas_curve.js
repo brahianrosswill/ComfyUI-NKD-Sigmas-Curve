@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 /**
 * @vue/shared v3.5.29
 * (c) 2018-present Yuxi (Evan) You and Vue contributors
@@ -6442,6 +6443,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     const dragIdx = /* @__PURE__ */ ref(-1);
     const hoverIdx = /* @__PURE__ */ ref(-1);
     const dragging = /* @__PURE__ */ ref(false);
+    const progressT = /* @__PURE__ */ ref(null);
     const extSteps = computed(() => {
       var _a;
       return +(((_a = props.stepsWidget) == null ? void 0 : _a.value) ?? 20);
@@ -6674,6 +6676,25 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       redraw();
       emit2();
     }
+    function drawProgressDot() {
+      const t = progressT.value;
+      if (t === null) return;
+      const y = sampleCurve(t);
+      const cx = toCanvasX(t);
+      const cy = toCanvasY(y);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,210,0,0.18)";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffd166";
+      ctx.shadowColor = "rgba(255,200,0,0.7)";
+      ctx.shadowBlur = 8;
+      ctx.fill();
+      ctx.restore();
+    }
     function redraw() {
       if (!ctx) return;
       ctx.clearRect(0, 0, CW, CH);
@@ -6684,6 +6705,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       drawCurve();
       if (interpolation.value === "smooth") drawControlPolygon();
       drawPoints();
+      drawProgressDot();
     }
     function drawBg() {
       ctx.fillStyle = C.bg;
@@ -6872,7 +6894,29 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       redraw();
       emit2();
     }
-    __expose({ serialise, deserialise });
+    function onProgressState(e) {
+      const { nodes } = e.detail;
+      let running = null;
+      for (const n of Object.values(nodes)) {
+        if (n.state === "running" && n.max > 0) {
+          running = n;
+          break;
+        }
+      }
+      progressT.value = running ? running.value / running.max : null;
+      redraw();
+    }
+    function onExecuting(e) {
+      if (e.detail === null) {
+        progressT.value = null;
+        redraw();
+      }
+    }
+    function cleanup() {
+      api.removeEventListener("progress_state", onProgressState);
+      api.removeEventListener("executing", onExecuting);
+    }
+    __expose({ serialise, deserialise, cleanup });
     function emit2() {
       var _a;
       (_a = props.onChange) == null ? void 0 : _a.call(props, serialise());
@@ -6890,6 +6934,8 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       ctx = canvas.getContext("2d");
       ctx.scale(dpr, dpr);
       redraw();
+      api.addEventListener("progress_state", onProgressState);
+      api.addEventListener("executing", onExecuting);
     });
     return (_ctx, _cache) => {
       return openBlock(), createElementBlock("div", _hoisted_1, [
@@ -6963,7 +7009,7 @@ const _export_sfc = (sfc, props) => {
   }
   return target;
 };
-const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-2c93d70f"]]);
+const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-95929c22"]]);
 const NODE_NAME = "NKDSigmasCurve";
 const EXT_NAME = "NKD.SigmasCurve.Vue";
 app.registerExtension({
@@ -7012,6 +7058,8 @@ app.registerExtension({
       if (saved) instance.deserialise(saved);
       const origRemoved = this.onRemoved;
       this.onRemoved = function() {
+        var _a2;
+        (_a2 = instance.cleanup) == null ? void 0 : _a2.call(instance);
         vueApp.unmount();
         origRemoved == null ? void 0 : origRemoved.apply(this, arguments);
       };
@@ -7024,7 +7072,7 @@ app.registerExtension({
   try {
     if (typeof document != "undefined") {
       var elementStyle = document.createElement("style");
-      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-2c93d70f] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-2c93d70f] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-2c93d70f] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: wrap;\n}\n.nkd-row--controls[data-v-2c93d70f] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-2c93d70f]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-2c93d70f] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-2c93d70f] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-2c93d70f]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-2c93d70f] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-2c93d70f] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-2c93d70f] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-2c93d70f] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-2c93d70f] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-2c93d70f] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-2c93d70f]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-info[data-v-2c93d70f] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-2c93d70f] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-2c93d70f] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
+      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-95929c22] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-95929c22] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-95929c22] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: wrap;\n}\n.nkd-row--controls[data-v-95929c22] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-95929c22]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-95929c22] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-95929c22] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-95929c22]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-95929c22] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-95929c22] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-95929c22] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-95929c22] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-95929c22] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-95929c22] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-95929c22]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-info[data-v-95929c22] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-95929c22] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-95929c22] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
       document.head.appendChild(elementStyle);
     }
   } catch (e) {

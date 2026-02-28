@@ -72,6 +72,7 @@
  */
 
 import { ref, computed, onMounted, watch } from "vue";
+import { api } from "../../scripts/api.js";
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 
@@ -122,9 +123,10 @@ const points        = ref<Point[]>([[0, 1, 1], [1, 0, 1]]);
 const interpolation = ref<"smooth" | "linear">("smooth");
 const tension       = ref(1.0);
 
-const dragIdx  = ref(-1);
-const hoverIdx = ref(-1);
-const dragging = ref(false);
+const dragIdx     = ref(-1);
+const hoverIdx    = ref(-1);
+const dragging    = ref(false);
+const progressT   = ref<number | null>(null);  // null = no active execution
 
 // External widget values (live-read each draw)
 const extSteps    = computed(() => +(props.stepsWidget?.value    ?? 20));
@@ -382,6 +384,30 @@ function onTensionInput(): void {
 
 // ── Canvas rendering ──────────────────────────────────────────────────────────
 
+function drawProgressDot(): void {
+  const t = progressT.value;
+  if (t === null) return;
+
+  const y  = sampleCurve(t);
+  const cx = toCanvasX(t);
+  const cy = toCanvasY(y);
+
+  ctx!.save();
+  // Outer halo
+  ctx!.beginPath();
+  ctx!.arc(cx, cy, 8, 0, Math.PI * 2);
+  ctx!.fillStyle = "rgba(255,210,0,0.18)";
+  ctx!.fill();
+  // Core dot
+  ctx!.beginPath();
+  ctx!.arc(cx, cy, 4.5, 0, Math.PI * 2);
+  ctx!.fillStyle = "#ffd166";
+  ctx!.shadowColor = "rgba(255,200,0,0.7)";
+  ctx!.shadowBlur  = 8;
+  ctx!.fill();
+  ctx!.restore();
+}
+
 function redraw(): void {
   if (!ctx) return;
   ctx.clearRect(0, 0, CW, CH);
@@ -392,6 +418,7 @@ function redraw(): void {
   drawCurve();
   if (interpolation.value === "smooth") drawControlPolygon();
   drawPoints();
+  drawProgressDot();
 }
 
 function drawBg(): void {
@@ -599,7 +626,33 @@ function resetCurve(): void {
   invalidateCache(); redraw(); emit();
 }
 
-defineExpose({ serialise, deserialise });
+// ── Progress listeners ────────────────────────────────────────────────────────
+
+function onProgressState(e: Event): void {
+  type NodeProg = { value: number; max: number; state: string };
+  const { nodes } = (e as CustomEvent).detail as { nodes: Record<string, NodeProg> };
+  let running: NodeProg | null = null;
+  for (const n of Object.values(nodes)) {
+    if (n.state === "running" && n.max > 0) { running = n; break; }
+  }
+  progressT.value = running ? running.value / running.max : null;
+  redraw();
+}
+
+function onExecuting(e: Event): void {
+  // detail is null when the entire execution finishes
+  if ((e as CustomEvent).detail === null) {
+    progressT.value = null;
+    redraw();
+  }
+}
+
+function cleanup(): void {
+  api.removeEventListener("progress_state", onProgressState);
+  api.removeEventListener("executing", onExecuting);
+}
+
+defineExpose({ serialise, deserialise, cleanup });
 
 function emit(): void { props.onChange?.(serialise()); }
 
@@ -616,6 +669,9 @@ onMounted(() => {
   ctx = canvas.getContext("2d")!;
   ctx.scale(dpr, dpr);
   redraw();
+
+  api.addEventListener("progress_state", onProgressState);
+  api.addEventListener("executing",      onExecuting);
 });
 </script>
 

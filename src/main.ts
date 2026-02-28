@@ -90,6 +90,7 @@ comfyApp.registerExtension({
       // Clean up the Vue app when the node is removed
       const origRemoved = this.onRemoved;
       this.onRemoved = function (this: any) {
+        instance.cleanup?.();
         vueApp.unmount();
         origRemoved?.apply(this, arguments as any);
       };
