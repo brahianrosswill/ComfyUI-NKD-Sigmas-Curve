@@ -36,7 +36,7 @@ This is all with a fixed seed. As you can see, specially in the las 2 generation
 - **Interactive canvas widget** embedded directly in the ComfyUI node, no external tools needed
 - **Click** to add control points, **drag** to reposition, **Shift+click** to remove
 - **Two interpolation modes:**
-  - **Smooth** — Cardinal/Hermite spline with per-point tension weights (`w=0` = Catmull-Rom, `w=1` = flat/linear blend)
+  - **Smooth** — B-spline with tension weights
   - **Linear** — Piecewise linear between control points
 - Outputs a standard `SIGMAS` tensor compatible with **all ComfyUI samplers**
 - No extra Python dependencies beyond what ComfyUI already includes
