@@ -286,7 +286,10 @@ class NKDSigmaCurve(io.ComfyNode):
                     tooltip="Maximum sigma value — curve top (y=1) maps to this",
                 ),
             ],
-            outputs=[io.Sigmas.Output()],
+            outputs=[
+                io.Sigmas.Output(),
+                io.Float.Output(display_name="floats"),
+            ],
         )
 
     @classmethod
@@ -297,7 +300,8 @@ class NKDSigmaCurve(io.ComfyNode):
         max_sigma: float,
     ) -> io.NodeOutput:
         """
-        Sample the curve and return a SIGMAS tensor of length ``steps + 1``.
+        Sample the curve and return a SIGMAS tensor and a float list, both of
+        length ``steps + 1``.
 
         Args:
             curve_data: JSON produced by the JS widget with keys:
@@ -353,7 +357,7 @@ class NKDSigmaCurve(io.ComfyNode):
         sigma_values[-1] = 0.0
 
         sigmas = torch.FloatTensor(sigma_values)
-        return io.NodeOutput(sigmas)
+        return io.NodeOutput(sigmas, sigma_values)
 
 
 # ─── V3 Extension entrypoint ──────────────────────────────────────────────────

@@ -7009,7 +7009,7 @@ const _export_sfc = (sfc, props) => {
   }
   return target;
 };
-const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-95929c22"]]);
+const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-a7f0977f"]]);
 const NODE_NAME = "NKDSigmasCurve";
 const EXT_NAME = "NKD.SigmasCurve.Vue";
 app.registerExtension({
@@ -7051,11 +7051,41 @@ app.registerExtension({
           serialize: false
         }
       );
+      const CANVAS_W = 320;
+      const CANVAS_H = 200;
+      const CANVAS_AR = CANVAS_H / CANVAS_W;
+      let barH = 50;
       if (domWidget) {
-        domWidget.computeSize = () => [320, 234];
+        domWidget.computeSize = (w) => [w, Math.round(w * CANVAS_AR) + barH];
       }
-      const saved = curveDataWidget == null ? void 0 : curveDataWidget.value;
-      if (saved) instance.deserialise(saved);
+      const origResize = this.onResize;
+      this.onResize = function(size) {
+        origResize == null ? void 0 : origResize.apply(this, arguments);
+        if (size[0] < CANVAS_W) size[0] = CANVAS_W;
+        size[1] = this.computeSize(size[0])[1];
+      };
+      const origComputeSize = this.computeSize.bind(this);
+      this.computeSize = function(w) {
+        const sz = origComputeSize(w);
+        const width = sz[0] || this.size[0];
+        const needed = Math.round(width * CANVAS_AR) + barH;
+        if (sz[1] < needed) sz[1] = needed;
+        return sz;
+      };
+      const origConfigure = this.onConfigure;
+      this.onConfigure = function(_data) {
+        origConfigure == null ? void 0 : origConfigure.apply(this, arguments);
+        const saved = curveDataWidget == null ? void 0 : curveDataWidget.value;
+        if (saved) instance.deserialise(saved);
+      };
+      requestAnimationFrame(() => {
+        const barEl = container.querySelector(".nkd-bar");
+        const measured = barEl ? Math.ceil(barEl.getBoundingClientRect().height) : 0;
+        if (measured > 0) barH = measured;
+        const sz = this.computeSize(this.size[0]);
+        this.setSize(sz);
+        this.setDirtyCanvas(true, true);
+      });
       const origRemoved = this.onRemoved;
       this.onRemoved = function() {
         var _a2;
@@ -7072,7 +7102,7 @@ app.registerExtension({
   try {
     if (typeof document != "undefined") {
       var elementStyle = document.createElement("style");
-      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-95929c22] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-95929c22] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-95929c22] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: wrap;\n}\n.nkd-row--controls[data-v-95929c22] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-95929c22]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-95929c22] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-95929c22] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-95929c22]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-95929c22] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-95929c22] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-95929c22] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-95929c22] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-95929c22] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-95929c22] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-95929c22]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-info[data-v-95929c22] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-95929c22] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-95929c22] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
+      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-a7f0977f] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-a7f0977f] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-a7f0977f] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-a7f0977f] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-a7f0977f]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-a7f0977f] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-a7f0977f] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-a7f0977f]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-a7f0977f] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-a7f0977f] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-a7f0977f] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-a7f0977f] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-a7f0977f] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-a7f0977f] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-a7f0977f]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-info[data-v-a7f0977f] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-a7f0977f] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-a7f0977f] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
       document.head.appendChild(elementStyle);
     }
   } catch (e) {

@@ -78,14 +78,67 @@ comfyApp.registerExtension({
         }
       );
 
+      // Canvas logical dimensions (must match SigmaCurveWidget.vue constants)
+      const CANVAS_W  = 320;
+      const CANVAS_H  = 200;
+      const CANVAS_AR = CANVAS_H / CANVAS_W; // 0.625
+
+      // barH is measured from the real DOM in requestAnimationFrame below.
+      // Start with a safe overestimate so the node is never too short before
+      // the measurement fires.
+      let barH = 50;
+
       if (domWidget) {
-        // canvas (200) + controls bar (34) = 234 px logical height
-        domWidget.computeSize = () => [320, 234];
+        // v1 (LiteGraph / DOMWidgetImpl) sets the element's CSS width directly
+        // from computeSize()[0]. Returning 0 makes the widget invisible, so we
+        // return `w` (the node width LiteGraph passes in). In v2 the value is
+        // ignored and CSS handles the width, so w is harmless there too.
+        // Height scales proportionally so the canvas aspect ratio is preserved.
+        domWidget.computeSize = (w: number) => [w, Math.round(w * CANVAS_AR) + barH];
       }
 
-      // Restore saved state
-      const saved = curveDataWidget?.value;
-      if (saved) instance.deserialise(saved);
+      // Enforce minimum width and lock height proportionally on every resize so
+      // the node border never ends up behind the DOM widget.
+      const origResize = this.onResize;
+      this.onResize = function (this: any, size: [number, number]) {
+        origResize?.apply(this, arguments as any);
+        if (size[0] < CANVAS_W) size[0] = CANVAS_W;
+        size[1] = this.computeSize(size[0])[1];
+      };
+
+      // Safety net: ensure node.computeSize() never reports less than the widget needs.
+      const origComputeSize = this.computeSize.bind(this);
+      this.computeSize = function (w?: number): [number, number] {
+        const sz: [number, number] = origComputeSize(w);
+        const width = sz[0] || this.size[0];
+        const needed = Math.round(width * CANVAS_AR) + barH;
+        if (sz[1] < needed) sz[1] = needed;
+        return sz;
+      };
+
+      // onNodeCreated fires BEFORE LiteGraph restores widget values from the
+      // saved workflow JSON, so curveDataWidget.value is still the default here.
+      // For brand-new nodes that is correct; for nodes loaded from a workflow
+      // we must wait for onConfigure (called after all widget values are set).
+      const origConfigure = this.onConfigure;
+      this.onConfigure = function (this: any, _data: any) {
+        origConfigure?.apply(this, arguments as any);
+        const saved = curveDataWidget?.value;
+        if (saved) instance.deserialise(saved);
+      };
+
+      // Measure the real controls-bar height after the DOM is rendered, update
+      // barH (both closures above already reference it), then force the node to
+      // adopt the corrected size so the border always wraps the content.
+      requestAnimationFrame(() => {
+        const barEl = container.querySelector(".nkd-bar") as HTMLElement | null;
+        const measured = barEl ? Math.ceil(barEl.getBoundingClientRect().height) : 0;
+        if (measured > 0) barH = measured;
+
+        const sz = this.computeSize(this.size[0]);
+        this.setSize(sz);
+        this.setDirtyCanvas(true, true);
+      });
 
       // Clean up the Vue app when the node is removed
       const origRemoved = this.onRemoved;

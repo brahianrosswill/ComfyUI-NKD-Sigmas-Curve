@@ -699,7 +699,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .nkd-row--controls { padding: 5px 7px 3px; }
