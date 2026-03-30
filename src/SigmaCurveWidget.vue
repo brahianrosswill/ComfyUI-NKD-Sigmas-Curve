@@ -28,6 +28,14 @@
 
         <div class="nkd-spacer" />
 
+        <!-- Endpoint lock/unlock toggle -->
+        <button
+          class="nkd-btn-lock"
+          :class="{ 'nkd-btn-lock--unlocked': !endpointsLocked }"
+          :title="endpointsLocked ? 'Desbloquear extremos' : 'Bloquear extremos'"
+          @click="toggleEndpointsLock"
+        >{{ endpointsLocked ? '⊠' : '⊡' }}</button>
+
         <!-- Reset button -->
         <button class="nkd-btn-reset" @click="resetCurve">↺</button>
 
@@ -37,7 +45,9 @@
       <div class="nkd-row nkd-row--hint">
         <span class="nkd-info">S: {{ extSteps }} | σmax: {{ fmtSigma(extMaxSigma) }}</span>
         <div class="nkd-spacer" />
-        <span class="nkd-hint">Click=add · Drag=move · Shift+click=delete</span>
+        <span class="nkd-hint">
+          Click=add · Drag=move · Shift+click=delete<span v-if="!endpointsLocked"> · Extremos libres</span>
+        </span>
       </div>
     </div>
 
@@ -78,6 +88,11 @@ import { api } from "../../scripts/api.js";
 
 const CW = 320;
 const CH = 200;
+
+// Minimum internal render scale relative to logical dimensions.
+// The canvas buffer is always at least CW×MIN_SCALE × CH×MIN_SCALE physical
+// pixels so CSS must down-scale (sharp) rather than up-scale (blurry).
+const MIN_RENDER_SCALE = 2;
 const PAD = { top: 16, right: 14, bottom: 22, left: 42 } as const;
 const IW  = CW - PAD.left - PAD.right;
 const IH  = CH - PAD.top  - PAD.bottom;
@@ -116,17 +131,19 @@ const props = defineProps<{
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
-let   ctx:       CanvasRenderingContext2D | null = null;
-let   dpr = 1;
+let   ctx:            CanvasRenderingContext2D | null = null;
+let   dpr             = 1;
+let   resizeObserver: ResizeObserver | null = null;
 
 const points        = ref<Point[]>([[0, 1, 1], [1, 0, 1]]);
 const interpolation = ref<"smooth" | "linear">("smooth");
 const tension       = ref(1.0);
 
-const dragIdx     = ref(-1);
-const hoverIdx    = ref(-1);
-const dragging    = ref(false);
-const progressT   = ref<number | null>(null);  // null = no active execution
+const dragIdx         = ref(-1);
+const hoverIdx        = ref(-1);
+const dragging        = ref(false);
+const progressT       = ref<number | null>(null);   // null = no active execution
+const endpointsLocked = ref(true);                  // first/last points locked by default
 
 // External widget values (live-read each draw)
 const extSteps    = computed(() => +(props.stepsWidget?.value    ?? 20));
@@ -305,9 +322,13 @@ function invalidateCache(): void { cachedTable = null; }
 function onDown(e: MouseEvent): void {
   const { x, y } = eventToLogical(e);
   const idx = hitTest(x, y);
+  const isEndpoint = idx === 0 || idx === points.value.length - 1;
 
-  // First and last points are locked — not draggable, not deletable
-  if (idx === 0 || idx === points.value.length - 1) return;
+  // Endpoints can never be deleted (shift+click)
+  if (isEndpoint && e.shiftKey) return;
+
+  // When locked, endpoints are also not draggable
+  if (endpointsLocked.value && isEndpoint) return;
 
   if (e.shiftKey) {
     if (idx >= 0 && points.value.length > 2) {
@@ -352,7 +373,9 @@ function onMove(e: MouseEvent): void {
   if (nh !== hoverIdx.value) {
     hoverIdx.value = nh;
     const n = points.value.length;
-    const cursor = (nh === 0 || nh === n - 1) ? "not-allowed" : nh > 0 ? "grab" : "crosshair";
+    const cursor = (endpointsLocked.value && (nh === 0 || nh === n - 1))
+      ? "not-allowed"
+      : nh > 0 ? "grab" : "crosshair";
     setCursor(cursor);
     redraw();
   }
@@ -541,9 +564,9 @@ function drawPoints(): void {
 
   sorted.forEach((pt, sortedI) => {
     const origI    = points.value.indexOf(pt);
-    const isLocked = sortedI === 0 || sortedI === lastIdx;
-    const isActive = !isLocked && origI === dragIdx.value;
-    const isHover  = !isLocked && origI === hoverIdx.value && !dragging.value;
+    const isLocked = endpointsLocked.value && (sortedI === 0 || sortedI === lastIdx);
+    const isActive = origI === dragIdx.value;
+    const isHover  = origI === hoverIdx.value && !dragging.value;
 
     const cx    = toCanvasX(pt[0]);
     const cy    = toCanvasY(pt[1]);
@@ -575,9 +598,10 @@ function drawPoints(): void {
 
 function serialise(): string {
   return JSON.stringify({
-    points:        points.value,
-    interpolation: interpolation.value,
-    tension:       tension.value,
+    points:          points.value,
+    interpolation:   interpolation.value,
+    tension:         tension.value,
+    endpointsLocked: endpointsLocked.value,
   });
 }
 
@@ -585,6 +609,11 @@ function deserialise(json: string): void {
   if (!json) return;
   try {
     const d = JSON.parse(json);
+    // Restore lock state first so endpoint clamping below is correct.
+    if (typeof d.endpointsLocked === "boolean") {
+      endpointsLocked.value = d.endpointsLocked;
+    }
+
     if (Array.isArray(d.points) && d.points.length >= 2) {
       points.value = d.points.map((p: unknown[]) => {
         const x = Math.max(0, Math.min(1, parseFloat(p[0] as string)));
@@ -598,10 +627,14 @@ function deserialise(json: string): void {
         return [x, y, w] as Point;
       });
       points.value.sort((a, b) => a[0] - b[0]);
-      // First point locked at (0,1), last at (1,0); preserve w
-      points.value[0][0] = 0; points.value[0][1] = 1;
+      // X is always pinned. Y is only forced to default (1 / 0) when locked.
+      points.value[0][0] = 0;
       const last = points.value.length - 1;
-      points.value[last][0] = 1; points.value[last][1] = 0;
+      points.value[last][0] = 1;
+      if (endpointsLocked.value) {
+        points.value[0][1]    = 1;
+        points.value[last][1] = 0;
+      }
     }
     // Remap legacy bspline → smooth
     if (d.interpolation === "bspline" || d.interpolation === "smooth") {
@@ -620,14 +653,36 @@ function deserialise(json: string): void {
 }
 
 function resetCurve(): void {
-  points.value        = [[0, 1, 1], [1, 0, 1]];
-  interpolation.value = "smooth";
-  tension.value       = 1.0;
+  points.value          = [[0, 1, 1], [1, 0, 1]];
+  interpolation.value   = "smooth";
+  tension.value         = 1.0;
+  endpointsLocked.value = true;
   invalidateCache(); redraw(); emit();
+}
+
+function toggleEndpointsLock(): void {
+  endpointsLocked.value = !endpointsLocked.value;
+  redraw();
+  emit();
 }
 
 // ── Progress listeners ────────────────────────────────────────────────────────
 
+function clearProgress(): void {
+  progressT.value = null;
+  redraw();
+}
+
+/** Universal step-progress event — works for samplers inside subgraphs. */
+function onProgress(e: Event): void {
+  const { value, max } = (e as CustomEvent).detail as { value: number; max: number };
+  if (max > 0) {
+    progressT.value = value / max;
+    redraw();
+  }
+}
+
+/** Finer-grained per-node progress state (not always emitted for subgraphs). */
 function onProgressState(e: Event): void {
   type NodeProg = { value: number; max: number; state: string };
   const { nodes } = (e as CustomEvent).detail as { nodes: Record<string, NodeProg> };
@@ -641,18 +696,21 @@ function onProgressState(e: Event): void {
 
 function onExecuting(e: Event): void {
   // detail is null when the entire execution finishes
-  if ((e as CustomEvent).detail === null) {
-    progressT.value = null;
-    redraw();
-  }
+  if ((e as CustomEvent).detail === null) clearProgress();
 }
 
 function cleanup(): void {
-  api.removeEventListener("progress_state", onProgressState);
-  api.removeEventListener("executing", onExecuting);
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  api.removeEventListener("progress",              onProgress);
+  api.removeEventListener("progress_state",        onProgressState);
+  api.removeEventListener("executing",             onExecuting);
+  api.removeEventListener("execution_success",     clearProgress);
+  api.removeEventListener("execution_error",       clearProgress);
+  api.removeEventListener("execution_interrupted", clearProgress);
 }
 
-defineExpose({ serialise, deserialise, cleanup });
+defineExpose({ serialise, deserialise, cleanup, forceResize });
 
 function emit(): void { props.onChange?.(serialise()); }
 
@@ -661,17 +719,63 @@ watch([interpolation, tension], () => { invalidateCache(); redraw(); });
 // Redraw when external widget values change (live axis labels)
 watch([extSteps, extMaxSigma], redraw);
 
+/**
+ * Resize the canvas drawing buffer to match its current CSS display size × dpr.
+ * Setting canvas.width/height resets all context state, so we re-apply the
+ * transform that maps logical coordinates (0..CW × 0..CH) to physical pixels.
+ * Called once by ResizeObserver whenever the element is resized.
+ */
+function syncCanvasSize(): boolean {
+  const canvas = canvasRef.value;
+  if (!canvas || !ctx) return false;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return false;
+
+  // Take the larger of: exact device-pixel scale or the quality minimum.
+  // When the node is small, MIN_RENDER_SCALE wins → buffer is larger than the
+  // CSS display area → CSS down-scales → crisp.
+  // When the node is large, the device-pixel scale wins → exact match → crisp.
+  const sx = Math.max(rect.width  / CW * dpr, MIN_RENDER_SCALE);
+  const sy = Math.max(rect.height / CH * dpr, MIN_RENDER_SCALE);
+  const newW = Math.round(CW * sx);
+  const newH = Math.round(CH * sy);
+  if (canvas.width === newW && canvas.height === newH) return true;  // no change needed
+
+  canvas.width  = newW;   // resets canvas context state
+  canvas.height = newH;
+  // Map logical coords (0..CW × 0..CH) to physical pixels
+  ctx.setTransform(sx, 0, 0, sy, 0, 0);
+  redraw();
+  return true;
+}
+
+/** Called by main.ts to force a canvas resize measurement. Returns true when the
+ *  canvas had a valid layout (width > 0), false when the DOM is not yet sized. */
+function forceResize(): boolean { return syncCanvasSize(); }
+
 onMounted(() => {
   const canvas = canvasRef.value!;
   dpr = Math.max(1, Math.ceil(window.devicePixelRatio || 1));
-  canvas.width  = CW * dpr;
-  canvas.height = CH * dpr;
+  // Fallback size until ResizeObserver fires with the actual CSS dimensions.
+  // Use MIN_RENDER_SCALE so the first frame is already high-quality.
+  const initScale = Math.max(dpr, MIN_RENDER_SCALE);
+  canvas.width  = CW * initScale;
+  canvas.height = CH * initScale;
   ctx = canvas.getContext("2d")!;
-  ctx.scale(dpr, dpr);
+  ctx.scale(initScale, initScale);
   redraw();
 
-  api.addEventListener("progress_state", onProgressState);
-  api.addEventListener("executing",      onExecuting);
+  // ResizeObserver fires (async, before paint) with the real CSS size and
+  // calls syncCanvasSize, which rebuilds the buffer at the correct resolution.
+  resizeObserver = new ResizeObserver(syncCanvasSize);
+  resizeObserver.observe(canvas);
+
+  api.addEventListener("progress",              onProgress);
+  api.addEventListener("progress_state",        onProgressState);
+  api.addEventListener("executing",             onExecuting);
+  api.addEventListener("execution_success",     clearProgress);
+  api.addEventListener("execution_error",       clearProgress);
+  api.addEventListener("execution_interrupted", clearProgress);
 });
 </script>
 
@@ -679,6 +783,7 @@ onMounted(() => {
 .nkd-root {
   display: flex;
   flex-direction: column;
+  height: 100%;
   background: transparent;
   overflow: hidden;
   font-family: sans-serif;
@@ -765,6 +870,25 @@ onMounted(() => {
 .nkd-btn-reset:hover {
   border-color: #4ab4ff;
   color: rgba(255,255,255,0.85);
+}
+
+.nkd-btn-lock {
+  font-size: 12px;
+  background: #252830;
+  border: 1px solid #3a3d46;
+  color: rgba(255,255,255,0.55);
+  border-radius: 4px;
+  padding: 1px 7px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.nkd-btn-lock:hover {
+  border-color: #4ab4ff;
+  color: rgba(255,255,255,0.85);
+}
+.nkd-btn-lock--unlocked {
+  border-color: #4ab4ff;
+  color: #4ab4ff;
 }
 
 .nkd-info {

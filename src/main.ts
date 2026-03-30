@@ -10,7 +10,7 @@
  * element for every new node instance.
  */
 
-import { createApp } from "vue";
+import { createApp, reactive } from "vue";
 import { app as comfyApp } from "../../scripts/app.js";
 import SigmaCurveWidget from "@/SigmaCurveWidget.vue";
 
@@ -33,10 +33,17 @@ comfyApp.registerExtension({
     nodeType.prototype.onNodeCreated = function (this: any) {
       const result = origCreated?.apply(this, arguments as any);
 
-      // ── Locate the curve_data string widget and hide it ──────────────
+      // ── Locate widgets ───────────────────────────────────────────────
       const curveDataWidget = this.widgets?.find(
         (w: any) => w.name === "curve_data"
       );
+      const stepsWidget    = this.widgets?.find((w: any) => w.name === "steps");
+      const maxSigmaWidget = this.widgets?.find((w: any) => w.name === "max_sigma");
+
+      // Reactive wrappers so the Vue computed values re-run when the
+      // LiteGraph widget values change (plain objects are not reactive).
+      const stepsProxy    = reactive({ value: stepsWidget?.value    ?? 20 });
+      const maxSigmaProxy = reactive({ value: maxSigmaWidget?.value ?? 1  });
 
       if (curveDataWidget) {
         curveDataWidget.type           = "hidden";
@@ -57,26 +64,48 @@ comfyApp.registerExtension({
           if (curveDataWidget) curveDataWidget.value = json;
           this.setDirtyCanvas(true);
         },
+        stepsWidget:    stepsProxy,
+        maxSigmaWidget: maxSigmaProxy,
       });
 
       const instance = vueApp.mount(container) as InstanceType<
         typeof SigmaCurveWidget
       >;
 
-      // ── Register DOM widget ──────────────────────────────────────────
-      const domWidget = this.addDOMWidget(
-        "sigma_curve_editor",
-        "CURVE_EDITOR",
-        container,
-        {
-          getValue: (): string => instance.serialise(),
-          setValue: (val: string): void => {
-            instance.deserialise(val);
-            if (curveDataWidget) curveDataWidget.value = val;
-          },
-          serialize: false,
-        }
-      );
+      // ── Sync widget values into the reactive proxies ─────────────────
+      // Primary path (v1 + v2): chain onto each widget's callback, which
+      // LiteGraph calls synchronously when the user changes the value.
+      // Vue detects the proxy mutation and re-evaluates extSteps / extMaxSigma.
+      if (stepsWidget) {
+        const origCb = stepsWidget.callback;
+        stepsWidget.callback = function (this: any, value: any) {
+          origCb?.call(this, value);
+          if (stepsProxy.value !== value) stepsProxy.value = value;
+        };
+      }
+      if (maxSigmaWidget) {
+        const origCb = maxSigmaWidget.callback;
+        maxSigmaWidget.callback = function (this: any, value: any) {
+          origCb?.call(this, value);
+          if (maxSigmaProxy.value !== value) maxSigmaProxy.value = value;
+        };
+      }
+
+      // Fallback (v1 only): onDrawBackground fires every canvas frame.
+      // Also used as a retry loop for the v1 blank-widget-on-first-load issue.
+      let v1NeedsInit = true;
+      const origDrawBg = this.onDrawBackground;
+      this.onDrawBackground = function (this: any, ctx: CanvasRenderingContext2D) {
+        origDrawBg?.apply(this, arguments as any);
+        // Keep proxies in sync even if callback wasn't called (e.g. programmatic changes).
+        if (stepsWidget    && stepsProxy.value    !== stepsWidget.value)
+          stepsProxy.value    = stepsWidget.value;
+        if (maxSigmaWidget && maxSigmaProxy.value !== maxSigmaWidget.value)
+          maxSigmaProxy.value = maxSigmaWidget.value;
+        // Once the canvas has real CSS dimensions, forceResize resolves the
+        // blank-widget-on-first-load issue in v1 mode.
+        if (v1NeedsInit && instance.forceResize?.()) v1NeedsInit = false;
+      };
 
       // Canvas logical dimensions (must match SigmaCurveWidget.vue constants)
       const CANVAS_W  = 320;
@@ -88,14 +117,32 @@ comfyApp.registerExtension({
       // the measurement fires.
       let barH = 50;
 
-      if (domWidget) {
-        // v1 (LiteGraph / DOMWidgetImpl) sets the element's CSS width directly
-        // from computeSize()[0]. Returning 0 makes the widget invisible, so we
-        // return `w` (the node width LiteGraph passes in). In v2 the value is
-        // ignored and CSS handles the width, so w is harmless there too.
-        // Height scales proportionally so the canvas aspect ratio is preserved.
-        domWidget.computeSize = (w: number) => [w, Math.round(w * CANVAS_AR) + barH];
-      }
+      // ── Register DOM widget ──────────────────────────────────────────
+      // IMPORTANT: Do NOT set domWidget.computeSize. v1's _arrangeWidgets
+      // calls widget.computeSize() with ZERO arguments; our old lambda
+      // (w) => [w, …] received w=undefined → NaN → collapsed widget.
+      // Without computeSize, v1 falls through to computeLayoutSize which
+      // reads getMinHeight/getMaxHeight/getHeight from options — correct.
+      const domWidget = this.addDOMWidget(
+        "sigma_curve_editor",
+        "CURVE_EDITOR",
+        container,
+        {
+          getValue: (): string => instance.serialise(),
+          setValue: (val: string): void => {
+            instance.deserialise(val);
+            if (curveDataWidget) curveDataWidget.value = val;
+          },
+          serialize: false,
+          hideOnZoom: false,
+          // v1 (DOMWidgetImpl.computeLayoutSize) reads these callbacks to
+          // allocate vertical space. All three return the same fixed height
+          // so the widget gets exactly the space it needs.
+          getMinHeight: () => Math.round((this.size?.[0] || CANVAS_W) * CANVAS_AR) + barH,
+          getMaxHeight: () => Math.round((this.size?.[0] || CANVAS_W) * CANVAS_AR) + barH,
+          getHeight:    () => Math.round((this.size?.[0] || CANVAS_W) * CANVAS_AR) + barH,
+        }
+      );
 
       // Enforce minimum width and lock height proportionally on every resize so
       // the node border never ends up behind the DOM widget.
@@ -108,8 +155,11 @@ comfyApp.registerExtension({
 
       // Safety net: ensure node.computeSize() never reports less than the widget needs.
       const origComputeSize = this.computeSize.bind(this);
-      this.computeSize = function (w?: number): [number, number] {
-        const sz: [number, number] = origComputeSize(w);
+      this.computeSize = function (_w?: number): [number, number] {
+        // Call without arguments: newer LiteGraph computeSize(out?) takes an
+        // optional output *array*, not a width number. Passing our width number
+        // would trigger "Cannot create property '0' on number" at LGN:1788.
+        const sz: [number, number] = origComputeSize();
         const width = sz[0] || this.size[0];
         const needed = Math.round(width * CANVAS_AR) + barH;
         if (sz[1] < needed) sz[1] = needed;
@@ -125,6 +175,9 @@ comfyApp.registerExtension({
         origConfigure?.apply(this, arguments as any);
         const saved = curveDataWidget?.value;
         if (saved) instance.deserialise(saved);
+        // In v1 mode the widget element may now have real dimensions after the
+        // graph is configured; try to resolve the canvas size immediately.
+        if (instance.forceResize?.()) v1NeedsInit = false;
       };
 
       // Measure the real controls-bar height after the DOM is rendered, update
@@ -134,6 +187,11 @@ comfyApp.registerExtension({
         const barEl = container.querySelector(".nkd-bar") as HTMLElement | null;
         const measured = barEl ? Math.ceil(barEl.getBoundingClientRect().height) : 0;
         if (measured > 0) barH = measured;
+
+        // Drive initial canvas resize from the real CSS dimensions now that
+        // the DOM has been laid out. This is the primary trigger for v1 mode
+        // where the ResizeObserver may fire before the widget has its final size.
+        if (instance.forceResize?.()) v1NeedsInit = false;
 
         const sz = this.computeSize(this.size[0]);
         this.setSize(sz);

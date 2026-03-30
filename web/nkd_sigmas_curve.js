@@ -5203,6 +5203,18 @@ function createElementBlock(type, props, children, patchFlag, dynamicProps, shap
     )
   );
 }
+function createBlock(type, props, children, patchFlag, dynamicProps) {
+  return setupBlock(
+    createVNode(
+      type,
+      props,
+      children,
+      patchFlag,
+      dynamicProps,
+      true
+    )
+  );
+}
 function isVNode(value) {
   return value ? value.__v_isVNode === true : false;
 }
@@ -5385,6 +5397,9 @@ function cloneVNode(vnode, extraProps, mergeRef = false, cloneTransition = false
 }
 function createTextVNode(text = " ", flag = 0) {
   return createVNode(Text, null, text, flag);
+}
+function createCommentVNode(text = "", asBlock = false) {
+  return asBlock ? (openBlock(), createBlock(Comment, null, text)) : createVNode(Comment, null, text);
 }
 function normalizeVNode(child) {
   if (child == null || typeof child === "boolean") {
@@ -6401,10 +6416,14 @@ const _hoisted_2 = { class: "nkd-bar" };
 const _hoisted_3 = { class: "nkd-row nkd-row--controls" };
 const _hoisted_4 = { class: "nkd-group" };
 const _hoisted_5 = { class: "nkd-mono" };
-const _hoisted_6 = { class: "nkd-row nkd-row--hint" };
-const _hoisted_7 = { class: "nkd-info" };
+const _hoisted_6 = ["title"];
+const _hoisted_7 = { class: "nkd-row nkd-row--hint" };
+const _hoisted_8 = { class: "nkd-info" };
+const _hoisted_9 = { class: "nkd-hint" };
+const _hoisted_10 = { key: 0 };
 const CW = 320;
 const CH = 200;
+const MIN_RENDER_SCALE = 2;
 const HIT_R = 10;
 const NURBS_DEGREE = 3;
 const NURBS_TABLE_SIZE = 500;
@@ -6437,6 +6456,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     const canvasRef = /* @__PURE__ */ ref(null);
     let ctx = null;
     let dpr = 1;
+    let resizeObserver = null;
     const points = /* @__PURE__ */ ref([[0, 1, 1], [1, 0, 1]]);
     const interpolation = /* @__PURE__ */ ref("smooth");
     const tension = /* @__PURE__ */ ref(1);
@@ -6444,6 +6464,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     const hoverIdx = /* @__PURE__ */ ref(-1);
     const dragging = /* @__PURE__ */ ref(false);
     const progressT = /* @__PURE__ */ ref(null);
+    const endpointsLocked = /* @__PURE__ */ ref(true);
     const extSteps = computed(() => {
       var _a;
       return +(((_a = props.stepsWidget) == null ? void 0 : _a.value) ?? 20);
@@ -6592,7 +6613,9 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     function onDown(e) {
       const { x, y } = eventToLogical(e);
       const idx = hitTest(x, y);
-      if (idx === 0 || idx === points.value.length - 1) return;
+      const isEndpoint = idx === 0 || idx === points.value.length - 1;
+      if (isEndpoint && e.shiftKey) return;
+      if (endpointsLocked.value && isEndpoint) return;
       if (e.shiftKey) {
         if (idx >= 0 && points.value.length > 2) {
           points.value.splice(idx, 1);
@@ -6643,7 +6666,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       if (nh !== hoverIdx.value) {
         hoverIdx.value = nh;
         const n = points.value.length;
-        const cursor = nh === 0 || nh === n - 1 ? "not-allowed" : nh > 0 ? "grab" : "crosshair";
+        const cursor = endpointsLocked.value && (nh === 0 || nh === n - 1) ? "not-allowed" : nh > 0 ? "grab" : "crosshair";
         setCursor(cursor);
         redraw();
       }
@@ -6815,9 +6838,9 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       const lastIdx = sorted.length - 1;
       sorted.forEach((pt, sortedI) => {
         const origI = points.value.indexOf(pt);
-        const isLocked = sortedI === 0 || sortedI === lastIdx;
-        const isActive = !isLocked && origI === dragIdx.value;
-        const isHover = !isLocked && origI === hoverIdx.value && !dragging.value;
+        const isLocked = endpointsLocked.value && (sortedI === 0 || sortedI === lastIdx);
+        const isActive = origI === dragIdx.value;
+        const isHover = origI === hoverIdx.value && !dragging.value;
         const cx = toCanvasX(pt[0]);
         const cy = toCanvasY(pt[1]);
         const r = isActive ? PT_R.active : isHover ? PT_R.hover : PT_R.idle;
@@ -6848,13 +6871,17 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       return JSON.stringify({
         points: points.value,
         interpolation: interpolation.value,
-        tension: tension.value
+        tension: tension.value,
+        endpointsLocked: endpointsLocked.value
       });
     }
     function deserialise(json) {
       if (!json) return;
       try {
         const d = JSON.parse(json);
+        if (typeof d.endpointsLocked === "boolean") {
+          endpointsLocked.value = d.endpointsLocked;
+        }
         if (Array.isArray(d.points) && d.points.length >= 2) {
           points.value = d.points.map((p2) => {
             const x = Math.max(0, Math.min(1, parseFloat(p2[0])));
@@ -6866,10 +6893,12 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
           });
           points.value.sort((a, b) => a[0] - b[0]);
           points.value[0][0] = 0;
-          points.value[0][1] = 1;
           const last = points.value.length - 1;
           points.value[last][0] = 1;
-          points.value[last][1] = 0;
+          if (endpointsLocked.value) {
+            points.value[0][1] = 1;
+            points.value[last][1] = 0;
+          }
         }
         if (d.interpolation === "bspline" || d.interpolation === "smooth") {
           interpolation.value = "smooth";
@@ -6890,9 +6919,26 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       points.value = [[0, 1, 1], [1, 0, 1]];
       interpolation.value = "smooth";
       tension.value = 1;
+      endpointsLocked.value = true;
       invalidateCache();
       redraw();
       emit2();
+    }
+    function toggleEndpointsLock() {
+      endpointsLocked.value = !endpointsLocked.value;
+      redraw();
+      emit2();
+    }
+    function clearProgress() {
+      progressT.value = null;
+      redraw();
+    }
+    function onProgress(e) {
+      const { value, max } = e.detail;
+      if (max > 0) {
+        progressT.value = value / max;
+        redraw();
+      }
     }
     function onProgressState(e) {
       const { nodes } = e.detail;
@@ -6907,16 +6953,19 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       redraw();
     }
     function onExecuting(e) {
-      if (e.detail === null) {
-        progressT.value = null;
-        redraw();
-      }
+      if (e.detail === null) clearProgress();
     }
     function cleanup() {
+      resizeObserver == null ? void 0 : resizeObserver.disconnect();
+      resizeObserver = null;
+      api.removeEventListener("progress", onProgress);
       api.removeEventListener("progress_state", onProgressState);
       api.removeEventListener("executing", onExecuting);
+      api.removeEventListener("execution_success", clearProgress);
+      api.removeEventListener("execution_error", clearProgress);
+      api.removeEventListener("execution_interrupted", clearProgress);
     }
-    __expose({ serialise, deserialise, cleanup });
+    __expose({ serialise, deserialise, cleanup, forceResize });
     function emit2() {
       var _a;
       (_a = props.onChange) == null ? void 0 : _a.call(props, serialise());
@@ -6926,16 +6975,42 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       redraw();
     });
     watch([extSteps, extMaxSigma], redraw);
+    function syncCanvasSize() {
+      const canvas = canvasRef.value;
+      if (!canvas || !ctx) return false;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return false;
+      const sx = Math.max(rect.width / CW * dpr, MIN_RENDER_SCALE);
+      const sy = Math.max(rect.height / CH * dpr, MIN_RENDER_SCALE);
+      const newW = Math.round(CW * sx);
+      const newH = Math.round(CH * sy);
+      if (canvas.width === newW && canvas.height === newH) return true;
+      canvas.width = newW;
+      canvas.height = newH;
+      ctx.setTransform(sx, 0, 0, sy, 0, 0);
+      redraw();
+      return true;
+    }
+    function forceResize() {
+      return syncCanvasSize();
+    }
     onMounted(() => {
       const canvas = canvasRef.value;
       dpr = Math.max(1, Math.ceil(window.devicePixelRatio || 1));
-      canvas.width = CW * dpr;
-      canvas.height = CH * dpr;
+      const initScale = Math.max(dpr, MIN_RENDER_SCALE);
+      canvas.width = CW * initScale;
+      canvas.height = CH * initScale;
       ctx = canvas.getContext("2d");
-      ctx.scale(dpr, dpr);
+      ctx.scale(initScale, initScale);
       redraw();
+      resizeObserver = new ResizeObserver(syncCanvasSize);
+      resizeObserver.observe(canvas);
+      api.addEventListener("progress", onProgress);
       api.addEventListener("progress_state", onProgressState);
       api.addEventListener("executing", onExecuting);
+      api.addEventListener("execution_success", clearProgress);
+      api.addEventListener("execution_error", clearProgress);
+      api.addEventListener("execution_interrupted", clearProgress);
     });
     return (_ctx, _cache) => {
       return openBlock(), createElementBlock("div", _hoisted_1, [
@@ -6977,14 +7052,22 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
             ]),
             _cache[7] || (_cache[7] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
             createBaseVNode("button", {
+              class: normalizeClass(["nkd-btn-lock", { "nkd-btn-lock--unlocked": !endpointsLocked.value }]),
+              title: endpointsLocked.value ? "Desbloquear extremos" : "Bloquear extremos",
+              onClick: toggleEndpointsLock
+            }, toDisplayString(endpointsLocked.value ? "⊠" : "⊡"), 11, _hoisted_6),
+            createBaseVNode("button", {
               class: "nkd-btn-reset",
               onClick: resetCurve
             }, "↺")
           ]),
-          createBaseVNode("div", _hoisted_6, [
-            createBaseVNode("span", _hoisted_7, "S: " + toDisplayString(extSteps.value) + " | σmax: " + toDisplayString(fmtSigma(extMaxSigma.value)), 1),
-            _cache[8] || (_cache[8] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
-            _cache[9] || (_cache[9] = createBaseVNode("span", { class: "nkd-hint" }, "Click=add · Drag=move · Shift+click=delete", -1))
+          createBaseVNode("div", _hoisted_7, [
+            createBaseVNode("span", _hoisted_8, "S: " + toDisplayString(extSteps.value) + " | σmax: " + toDisplayString(fmtSigma(extMaxSigma.value)), 1),
+            _cache[9] || (_cache[9] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
+            createBaseVNode("span", _hoisted_9, [
+              _cache[8] || (_cache[8] = createTextVNode(" Click=add · Drag=move · Shift+click=delete", -1)),
+              !endpointsLocked.value ? (openBlock(), createElementBlock("span", _hoisted_10, " · Extremos libres")) : createCommentVNode("", true)
+            ])
           ])
         ]),
         createBaseVNode("canvas", {
@@ -7009,7 +7092,7 @@ const _export_sfc = (sfc, props) => {
   }
   return target;
 };
-const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-a7f0977f"]]);
+const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-a896ae4d"]]);
 const NODE_NAME = "NKDSigmasCurve";
 const EXT_NAME = "NKD.SigmasCurve.Vue";
 app.registerExtension({
@@ -7018,11 +7101,15 @@ app.registerExtension({
     if (nodeData.name !== NODE_NAME) return;
     const origCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function() {
-      var _a;
+      var _a, _b, _c;
       const result = origCreated == null ? void 0 : origCreated.apply(this, arguments);
       const curveDataWidget = (_a = this.widgets) == null ? void 0 : _a.find(
         (w) => w.name === "curve_data"
       );
+      const stepsWidget = (_b = this.widgets) == null ? void 0 : _b.find((w) => w.name === "steps");
+      const maxSigmaWidget = (_c = this.widgets) == null ? void 0 : _c.find((w) => w.name === "max_sigma");
+      const stepsProxy = /* @__PURE__ */ reactive({ value: (stepsWidget == null ? void 0 : stepsWidget.value) ?? 20 });
+      const maxSigmaProxy = /* @__PURE__ */ reactive({ value: (maxSigmaWidget == null ? void 0 : maxSigmaWidget.value) ?? 1 });
       if (curveDataWidget) {
         curveDataWidget.type = "hidden";
         curveDataWidget.computedHeight = 0;
@@ -7035,10 +7122,41 @@ app.registerExtension({
         onChange: (json) => {
           if (curveDataWidget) curveDataWidget.value = json;
           this.setDirtyCanvas(true);
-        }
+        },
+        stepsWidget: stepsProxy,
+        maxSigmaWidget: maxSigmaProxy
       });
       const instance = vueApp.mount(container);
-      const domWidget = this.addDOMWidget(
+      if (stepsWidget) {
+        const origCb = stepsWidget.callback;
+        stepsWidget.callback = function(value) {
+          origCb == null ? void 0 : origCb.call(this, value);
+          if (stepsProxy.value !== value) stepsProxy.value = value;
+        };
+      }
+      if (maxSigmaWidget) {
+        const origCb = maxSigmaWidget.callback;
+        maxSigmaWidget.callback = function(value) {
+          origCb == null ? void 0 : origCb.call(this, value);
+          if (maxSigmaProxy.value !== value) maxSigmaProxy.value = value;
+        };
+      }
+      let v1NeedsInit = true;
+      const origDrawBg = this.onDrawBackground;
+      this.onDrawBackground = function(ctx) {
+        var _a2;
+        origDrawBg == null ? void 0 : origDrawBg.apply(this, arguments);
+        if (stepsWidget && stepsProxy.value !== stepsWidget.value)
+          stepsProxy.value = stepsWidget.value;
+        if (maxSigmaWidget && maxSigmaProxy.value !== maxSigmaWidget.value)
+          maxSigmaProxy.value = maxSigmaWidget.value;
+        if (v1NeedsInit && ((_a2 = instance.forceResize) == null ? void 0 : _a2.call(instance))) v1NeedsInit = false;
+      };
+      const CANVAS_W = 320;
+      const CANVAS_H = 200;
+      const CANVAS_AR = CANVAS_H / CANVAS_W;
+      let barH = 50;
+      this.addDOMWidget(
         "sigma_curve_editor",
         "CURVE_EDITOR",
         container,
@@ -7048,16 +7166,25 @@ app.registerExtension({
             instance.deserialise(val);
             if (curveDataWidget) curveDataWidget.value = val;
           },
-          serialize: false
+          serialize: false,
+          hideOnZoom: false,
+          // v1 (DOMWidgetImpl.computeLayoutSize) reads these callbacks to
+          // allocate vertical space. All three return the same fixed height
+          // so the widget gets exactly the space it needs.
+          getMinHeight: () => {
+            var _a2;
+            return Math.round((((_a2 = this.size) == null ? void 0 : _a2[0]) || CANVAS_W) * CANVAS_AR) + barH;
+          },
+          getMaxHeight: () => {
+            var _a2;
+            return Math.round((((_a2 = this.size) == null ? void 0 : _a2[0]) || CANVAS_W) * CANVAS_AR) + barH;
+          },
+          getHeight: () => {
+            var _a2;
+            return Math.round((((_a2 = this.size) == null ? void 0 : _a2[0]) || CANVAS_W) * CANVAS_AR) + barH;
+          }
         }
       );
-      const CANVAS_W = 320;
-      const CANVAS_H = 200;
-      const CANVAS_AR = CANVAS_H / CANVAS_W;
-      let barH = 50;
-      if (domWidget) {
-        domWidget.computeSize = (w) => [w, Math.round(w * CANVAS_AR) + barH];
-      }
       const origResize = this.onResize;
       this.onResize = function(size) {
         origResize == null ? void 0 : origResize.apply(this, arguments);
@@ -7065,8 +7192,8 @@ app.registerExtension({
         size[1] = this.computeSize(size[0])[1];
       };
       const origComputeSize = this.computeSize.bind(this);
-      this.computeSize = function(w) {
-        const sz = origComputeSize(w);
+      this.computeSize = function(_w) {
+        const sz = origComputeSize();
         const width = sz[0] || this.size[0];
         const needed = Math.round(width * CANVAS_AR) + barH;
         if (sz[1] < needed) sz[1] = needed;
@@ -7074,14 +7201,18 @@ app.registerExtension({
       };
       const origConfigure = this.onConfigure;
       this.onConfigure = function(_data) {
+        var _a2;
         origConfigure == null ? void 0 : origConfigure.apply(this, arguments);
         const saved = curveDataWidget == null ? void 0 : curveDataWidget.value;
         if (saved) instance.deserialise(saved);
+        if ((_a2 = instance.forceResize) == null ? void 0 : _a2.call(instance)) v1NeedsInit = false;
       };
       requestAnimationFrame(() => {
+        var _a2;
         const barEl = container.querySelector(".nkd-bar");
         const measured = barEl ? Math.ceil(barEl.getBoundingClientRect().height) : 0;
         if (measured > 0) barH = measured;
+        if ((_a2 = instance.forceResize) == null ? void 0 : _a2.call(instance)) v1NeedsInit = false;
         const sz = this.computeSize(this.size[0]);
         this.setSize(sz);
         this.setDirtyCanvas(true, true);
@@ -7102,7 +7233,7 @@ app.registerExtension({
   try {
     if (typeof document != "undefined") {
       var elementStyle = document.createElement("style");
-      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-a7f0977f] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-a7f0977f] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-a7f0977f] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-a7f0977f] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-a7f0977f]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-a7f0977f] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-a7f0977f] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-a7f0977f]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-a7f0977f] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-a7f0977f] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-a7f0977f] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-a7f0977f] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-a7f0977f] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-a7f0977f] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-a7f0977f]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-info[data-v-a7f0977f] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-a7f0977f] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-a7f0977f] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
+      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-a896ae4d] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-a896ae4d] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-a896ae4d] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-a896ae4d] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-a896ae4d]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-a896ae4d] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-a896ae4d] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-a896ae4d]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-a896ae4d] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-a896ae4d] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-a896ae4d] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-a896ae4d] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-a896ae4d] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-a896ae4d] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-a896ae4d]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock[data-v-a896ae4d] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-lock[data-v-a896ae4d]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock--unlocked[data-v-a896ae4d] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-info[data-v-a896ae4d] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-a896ae4d] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-a896ae4d] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
       document.head.appendChild(elementStyle);
     }
   } catch (e) {
