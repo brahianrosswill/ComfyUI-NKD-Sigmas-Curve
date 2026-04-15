@@ -36,6 +36,15 @@
           @click="toggleEndpointsLock"
         >{{ endpointsLocked ? '⊠' : '⊡' }}</button>
 
+        <!-- Snap to steps toggle (only available when steps <= 15) -->
+        <button
+          class="nkd-btn-snap"
+          :class="{ 'nkd-btn-snap--active': snapEnabled, 'nkd-btn-snap--disabled': extSteps > 15 }"
+          :disabled="extSteps > 15"
+          :title="extSteps > 15 ? 'Snap disponible solo hasta 15 pasos' : snapEnabled ? 'Desactivar snap a pasos' : 'Activar snap a pasos'"
+          @click="toggleSnap"
+        >⊞</button>
+
         <!-- Reset button -->
         <button class="nkd-btn-reset" @click="resetCurve">↺</button>
 
@@ -144,10 +153,14 @@ const hoverIdx        = ref(-1);
 const dragging        = ref(false);
 const progressT       = ref<number | null>(null);   // null = no active execution
 const endpointsLocked = ref(true);                  // first/last points locked by default
+const snapToSteps     = ref(false);                 // snap X to step positions
 
 // External widget values (live-read each draw)
 const extSteps    = computed(() => +(props.stepsWidget?.value    ?? 20));
 const extMaxSigma = computed(() => +(props.maxSigmaWidget?.value ?? 1.0));
+
+// Snap is only active when explicitly enabled AND steps <= 15
+const snapEnabled = computed(() => snapToSteps.value && extSteps.value <= 15);
 
 // ── Label formatter ───────────────────────────────────────────────────────────
 
@@ -174,6 +187,13 @@ function eventToLogical(e: MouseEvent): { x: number; y: number } {
     x: (e.clientX - rect.left) * (CW / rect.width),
     y: (e.clientY - rect.top)  * (CH / rect.height),
   };
+}
+
+/** Snap a normalised X value to the nearest step boundary when snap is active. */
+function snapX(x: number): number {
+  const steps = extSteps.value;
+  if (!snapEnabled.value || steps <= 0) return x;
+  return Math.round(x * steps) / steps;
 }
 
 function hitTest(lx: number, ly: number): number {
@@ -344,7 +364,7 @@ function onDown(e: MouseEvent): void {
     dragging.value = true;
     setCursor("grabbing");
   } else {
-    const newPt: Point = [fromCX(x), fromCY(y), tension.value];
+    const newPt: Point = [snapX(fromCX(x)), fromCY(y), tension.value];
     const at = points.value.findIndex(p => p[0] > newPt[0]);
     if (at === -1) { points.value.push(newPt); dragIdx.value = points.value.length - 1; }
     else           { points.value.splice(at, 0, newPt); dragIdx.value = at; }
@@ -361,7 +381,7 @@ function onMove(e: MouseEvent): void {
     const isFirst = dragIdx.value === 0;
     const isLast  = dragIdx.value === points.value.length - 1;
     const pt = points.value[dragIdx.value];
-    pt[0] = isFirst ? 0 : isLast ? 1 : fromCX(x);
+    pt[0] = isFirst ? 0 : isLast ? 1 : snapX(fromCX(x));
     pt[1] = fromCY(y);
     points.value.sort((a, b) => a[0] - b[0]);
     dragIdx.value = points.value.indexOf(pt);
@@ -436,6 +456,7 @@ function redraw(): void {
   ctx.clearRect(0, 0, CW, CH);
   drawBg();
   drawGrid();
+  drawSnapGrid();
   drawAxisLabels();
   drawFill();
   drawCurve();
@@ -483,6 +504,24 @@ function drawGrid(): void {
   ctx!.strokeStyle = C.gridBorder;
   ctx!.lineWidth   = 0.75;
   ctx!.strokeRect(PAD.left + 0.5, PAD.top + 0.5, IW, IH);
+  ctx!.restore();
+}
+
+/** Draw vertical snap lines at each step position (only when snap is active). */
+function drawSnapGrid(): void {
+  const steps = extSteps.value;
+  if (!snapEnabled.value || steps <= 0) return;
+  ctx!.save();
+  ctx!.strokeStyle = "rgba(74,180,255,0.18)";
+  ctx!.lineWidth   = 0.75;
+  ctx!.setLineDash([2, 3]);
+  for (let i = 0; i <= steps; i++) {
+    const cx = toCanvasX(i / steps);
+    ctx!.beginPath();
+    ctx!.moveTo(cx, PAD.top);
+    ctx!.lineTo(cx, PAD.top + IH);
+    ctx!.stroke();
+  }
   ctx!.restore();
 }
 
@@ -602,6 +641,7 @@ function serialise(): string {
     interpolation:   interpolation.value,
     tension:         tension.value,
     endpointsLocked: endpointsLocked.value,
+    snapToSteps:     snapToSteps.value,
   });
 }
 
@@ -612,6 +652,9 @@ function deserialise(json: string): void {
     // Restore lock state first so endpoint clamping below is correct.
     if (typeof d.endpointsLocked === "boolean") {
       endpointsLocked.value = d.endpointsLocked;
+    }
+    if (typeof d.snapToSteps === "boolean") {
+      snapToSteps.value = d.snapToSteps;
     }
 
     if (Array.isArray(d.points) && d.points.length >= 2) {
@@ -657,11 +700,19 @@ function resetCurve(): void {
   interpolation.value   = "smooth";
   tension.value         = 1.0;
   endpointsLocked.value = true;
+  snapToSteps.value     = false;
   invalidateCache(); redraw(); emit();
 }
 
 function toggleEndpointsLock(): void {
   endpointsLocked.value = !endpointsLocked.value;
+  redraw();
+  emit();
+}
+
+function toggleSnap(): void {
+  if (extSteps.value > 15) return;
+  snapToSteps.value = !snapToSteps.value;
   redraw();
   emit();
 }
@@ -716,8 +767,18 @@ function emit(): void { props.onChange?.(serialise()); }
 
 // Redraw when reactive state changes — also invalidate NURBS cache
 watch([interpolation, tension], () => { invalidateCache(); redraw(); });
+// Redraw when snap state changes
+watch(snapEnabled, redraw);
 // Redraw when external widget values change (live axis labels)
-watch([extSteps, extMaxSigma], redraw);
+// Auto-disable snap if steps exceeds the maximum
+watch(extSteps, (newSteps) => {
+  if (newSteps > 15 && snapToSteps.value) {
+    snapToSteps.value = false;
+    emit();
+  }
+  redraw();
+});
+watch(extMaxSigma, redraw);
 
 /**
  * Resize the canvas drawing buffer to match its current CSS display size × dpr.
@@ -889,6 +950,30 @@ onMounted(() => {
 .nkd-btn-lock--unlocked {
   border-color: #4ab4ff;
   color: #4ab4ff;
+}
+
+.nkd-btn-snap {
+  font-size: 12px;
+  background: #252830;
+  border: 1px solid #3a3d46;
+  color: rgba(255,255,255,0.55);
+  border-radius: 4px;
+  padding: 1px 7px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.nkd-btn-snap:hover:not(:disabled) {
+  border-color: #4ab4ff;
+  color: rgba(255,255,255,0.85);
+}
+.nkd-btn-snap--active {
+  border-color: #4ab4ff;
+  color: #4ab4ff;
+}
+.nkd-btn-snap--disabled,
+.nkd-btn-snap:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .nkd-info {
