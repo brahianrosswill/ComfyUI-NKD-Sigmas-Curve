@@ -6489,6 +6489,8 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     const toCanvasY = (ny) => PAD.top + (1 - ny) * IH;
     const fromCX = (cx) => Math.max(0, Math.min(1, (cx - PAD.left) / IW));
     const fromCY = (cy) => Math.max(0, Math.min(1, 1 - (cy - PAD.top) / IH));
+    const rawNX = (cx) => (cx - PAD.left) / IW;
+    const rawNY = (cy) => 1 - (cy - PAD.top) / IH;
     function eventToLogical(e) {
       const rect = canvasRef.value.getBoundingClientRect();
       return {
@@ -6615,6 +6617,8 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       const result = tableLookupY(cachedTable.xs, cachedTable.ys, t);
       return Math.max(0, Math.min(1, result));
     }
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
     function invalidateCache() {
       cachedTable = null;
     }
@@ -6637,8 +6641,13 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       if (idx >= 0) {
         dragIdx.value = idx;
         dragging.value = true;
+        const pt = points.value[idx];
+        dragOffsetX = pt[0] - rawNX(x);
+        dragOffsetY = pt[1] - rawNY(y);
         setCursor("grabbing");
       } else {
+        dragOffsetX = 0;
+        dragOffsetY = 0;
         const newPt = [snapX(fromCX(x)), fromCY(y), tension.value];
         const at = points.value.findIndex((p2) => p2[0] > newPt[0]);
         if (at === -1) {
@@ -6661,8 +6670,8 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
         const isFirst = dragIdx.value === 0;
         const isLast = dragIdx.value === points.value.length - 1;
         const pt = points.value[dragIdx.value];
-        pt[0] = isFirst ? 0 : isLast ? 1 : snapX(fromCX(x));
-        pt[1] = fromCY(y);
+        pt[0] = isFirst ? 0 : isLast ? 1 : snapX(Math.max(0, Math.min(1, rawNX(x) + dragOffsetX)));
+        pt[1] = Math.max(0, Math.min(1, rawNY(y) + dragOffsetY));
         points.value.sort((a, b) => a[0] - b[0]);
         dragIdx.value = points.value.indexOf(pt);
         invalidateCache();
@@ -7142,7 +7151,7 @@ const _export_sfc = (sfc, props) => {
   }
   return target;
 };
-const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-ca6ec281"]]);
+const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-ab2fdd1a"]]);
 const NODE_NAME = "NKDSigmasCurve";
 const EXT_NAME = "NKD.SigmasCurve.Vue";
 app.registerExtension({
@@ -7283,7 +7292,7 @@ app.registerExtension({
   try {
     if (typeof document != "undefined") {
       var elementStyle = document.createElement("style");
-      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-ca6ec281] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-ca6ec281] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-ca6ec281] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-ca6ec281] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-ca6ec281]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-ca6ec281] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-ca6ec281] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-ca6ec281]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-ca6ec281] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-ca6ec281] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-ca6ec281] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-ca6ec281] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-ca6ec281] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-ca6ec281] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-ca6ec281]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock[data-v-ca6ec281] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-lock[data-v-ca6ec281]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock--unlocked[data-v-ca6ec281] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn-snap[data-v-ca6ec281] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-snap[data-v-ca6ec281]:hover:not(:disabled) {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-snap--active[data-v-ca6ec281] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn-snap--disabled[data-v-ca6ec281],\r\n.nkd-btn-snap[data-v-ca6ec281]:disabled {\r\n  opacity: 0.3;\r\n  cursor: not-allowed;\n}\n.nkd-info[data-v-ca6ec281] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-ca6ec281] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-ca6ec281] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
+      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-ab2fdd1a] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-ab2fdd1a] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-ab2fdd1a] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-ab2fdd1a] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-ab2fdd1a]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-ab2fdd1a] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-ab2fdd1a] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-ab2fdd1a]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-ab2fdd1a] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-ab2fdd1a] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-ab2fdd1a] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-ab2fdd1a] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-ab2fdd1a] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-ab2fdd1a] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-ab2fdd1a]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock[data-v-ab2fdd1a] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-lock[data-v-ab2fdd1a]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock--unlocked[data-v-ab2fdd1a] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn-snap[data-v-ab2fdd1a] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-snap[data-v-ab2fdd1a]:hover:not(:disabled) {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-snap--active[data-v-ab2fdd1a] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn-snap--disabled[data-v-ab2fdd1a],\r\n.nkd-btn-snap[data-v-ab2fdd1a]:disabled {\r\n  opacity: 0.3;\r\n  cursor: not-allowed;\n}\n.nkd-info[data-v-ab2fdd1a] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-ab2fdd1a] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-ab2fdd1a] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
       document.head.appendChild(elementStyle);
     }
   } catch (e) {
