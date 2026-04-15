@@ -180,6 +180,9 @@ const toCanvasX  = (nx: number) => PAD.left + nx * IW;
 const toCanvasY  = (ny: number) => PAD.top  + (1 - ny) * IH;
 const fromCX     = (cx: number) => Math.max(0, Math.min(1, (cx - PAD.left) / IW));
 const fromCY     = (cy: number) => Math.max(0, Math.min(1, 1 - (cy - PAD.top) / IH));
+// Unclamped versions — needed to compute drag offsets correctly at canvas edges
+const rawNX      = (cx: number) => (cx - PAD.left) / IW;
+const rawNY      = (cy: number) => 1 - (cy - PAD.top) / IH;
 
 function eventToLogical(e: MouseEvent): { x: number; y: number } {
   const rect = canvasRef.value!.getBoundingClientRect();
@@ -337,6 +340,11 @@ function sampleCurve(t: number): number {
 
 // ── Mouse handlers ────────────────────────────────────────────────────────────
 
+// Offset (in normalised coords) between the grabbed point and the cursor at
+// the moment of mousedown.  Applied in onMove so the point never jumps.
+let dragOffsetX = 0;
+let dragOffsetY = 0;
+
 function invalidateCache(): void { cachedTable = null; }
 
 function onDown(e: MouseEvent): void {
@@ -362,8 +370,14 @@ function onDown(e: MouseEvent): void {
   if (idx >= 0) {
     dragIdx.value  = idx;
     dragging.value = true;
+    // Record the offset so the point moves relative to its original position
+    const pt = points.value[idx];
+    dragOffsetX = pt[0] - rawNX(x);
+    dragOffsetY = pt[1] - rawNY(y);
     setCursor("grabbing");
   } else {
+    dragOffsetX = 0;
+    dragOffsetY = 0;
     const newPt: Point = [snapX(fromCX(x)), fromCY(y), tension.value];
     const at = points.value.findIndex(p => p[0] > newPt[0]);
     if (at === -1) { points.value.push(newPt); dragIdx.value = points.value.length - 1; }
@@ -381,8 +395,8 @@ function onMove(e: MouseEvent): void {
     const isFirst = dragIdx.value === 0;
     const isLast  = dragIdx.value === points.value.length - 1;
     const pt = points.value[dragIdx.value];
-    pt[0] = isFirst ? 0 : isLast ? 1 : snapX(fromCX(x));
-    pt[1] = fromCY(y);
+    pt[0] = isFirst ? 0 : isLast ? 1 : snapX(Math.max(0, Math.min(1, rawNX(x) + dragOffsetX)));
+    pt[1] = Math.max(0, Math.min(1, rawNY(y) + dragOffsetY));
     points.value.sort((a, b) => a[0] - b[0]);
     dragIdx.value = points.value.indexOf(pt);
     invalidateCache(); redraw(); emit();
