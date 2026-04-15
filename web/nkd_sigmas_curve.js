@@ -6417,10 +6417,11 @@ const _hoisted_3 = { class: "nkd-row nkd-row--controls" };
 const _hoisted_4 = { class: "nkd-group" };
 const _hoisted_5 = { class: "nkd-mono" };
 const _hoisted_6 = ["title"];
-const _hoisted_7 = { class: "nkd-row nkd-row--hint" };
-const _hoisted_8 = { class: "nkd-info" };
-const _hoisted_9 = { class: "nkd-hint" };
-const _hoisted_10 = { key: 0 };
+const _hoisted_7 = ["disabled", "title"];
+const _hoisted_8 = { class: "nkd-row nkd-row--hint" };
+const _hoisted_9 = { class: "nkd-info" };
+const _hoisted_10 = { class: "nkd-hint" };
+const _hoisted_11 = { key: 0 };
 const CW = 320;
 const CH = 200;
 const MIN_RENDER_SCALE = 2;
@@ -6465,6 +6466,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     const dragging = /* @__PURE__ */ ref(false);
     const progressT = /* @__PURE__ */ ref(null);
     const endpointsLocked = /* @__PURE__ */ ref(true);
+    const snapToSteps = /* @__PURE__ */ ref(false);
     const extSteps = computed(() => {
       var _a;
       return +(((_a = props.stepsWidget) == null ? void 0 : _a.value) ?? 20);
@@ -6473,6 +6475,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       var _a;
       return +(((_a = props.maxSigmaWidget) == null ? void 0 : _a.value) ?? 1);
     });
+    const snapEnabled = computed(() => snapToSteps.value && extSteps.value <= 15);
     function fmtSigma(v) {
       const a = Math.abs(v);
       if (a === 0) return "0";
@@ -6492,6 +6495,11 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
         x: (e.clientX - rect.left) * (CW / rect.width),
         y: (e.clientY - rect.top) * (CH / rect.height)
       };
+    }
+    function snapX(x) {
+      const steps = extSteps.value;
+      if (!snapEnabled.value || steps <= 0) return x;
+      return Math.round(x * steps) / steps;
     }
     function hitTest(lx, ly) {
       let nearest = -1, minD = HIT_R;
@@ -6631,7 +6639,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
         dragging.value = true;
         setCursor("grabbing");
       } else {
-        const newPt = [fromCX(x), fromCY(y), tension.value];
+        const newPt = [snapX(fromCX(x)), fromCY(y), tension.value];
         const at = points.value.findIndex((p2) => p2[0] > newPt[0]);
         if (at === -1) {
           points.value.push(newPt);
@@ -6653,7 +6661,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
         const isFirst = dragIdx.value === 0;
         const isLast = dragIdx.value === points.value.length - 1;
         const pt = points.value[dragIdx.value];
-        pt[0] = isFirst ? 0 : isLast ? 1 : fromCX(x);
+        pt[0] = isFirst ? 0 : isLast ? 1 : snapX(fromCX(x));
         pt[1] = fromCY(y);
         points.value.sort((a, b) => a[0] - b[0]);
         dragIdx.value = points.value.indexOf(pt);
@@ -6723,6 +6731,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       ctx.clearRect(0, 0, CW, CH);
       drawBg();
       drawGrid();
+      drawSnapGrid();
       drawAxisLabels();
       drawFill();
       drawCurve();
@@ -6771,6 +6780,22 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       ctx.strokeStyle = C.gridBorder;
       ctx.lineWidth = 0.75;
       ctx.strokeRect(PAD.left + 0.5, PAD.top + 0.5, IW, IH);
+      ctx.restore();
+    }
+    function drawSnapGrid() {
+      const steps = extSteps.value;
+      if (!snapEnabled.value || steps <= 0) return;
+      ctx.save();
+      ctx.strokeStyle = "rgba(74,180,255,0.18)";
+      ctx.lineWidth = 0.75;
+      ctx.setLineDash([2, 3]);
+      for (let i = 0; i <= steps; i++) {
+        const cx = toCanvasX(i / steps);
+        ctx.beginPath();
+        ctx.moveTo(cx, PAD.top);
+        ctx.lineTo(cx, PAD.top + IH);
+        ctx.stroke();
+      }
       ctx.restore();
     }
     function drawAxisLabels() {
@@ -6872,7 +6897,8 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
         points: points.value,
         interpolation: interpolation.value,
         tension: tension.value,
-        endpointsLocked: endpointsLocked.value
+        endpointsLocked: endpointsLocked.value,
+        snapToSteps: snapToSteps.value
       });
     }
     function deserialise(json) {
@@ -6881,6 +6907,9 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
         const d = JSON.parse(json);
         if (typeof d.endpointsLocked === "boolean") {
           endpointsLocked.value = d.endpointsLocked;
+        }
+        if (typeof d.snapToSteps === "boolean") {
+          snapToSteps.value = d.snapToSteps;
         }
         if (Array.isArray(d.points) && d.points.length >= 2) {
           points.value = d.points.map((p2) => {
@@ -6920,12 +6949,19 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       interpolation.value = "smooth";
       tension.value = 1;
       endpointsLocked.value = true;
+      snapToSteps.value = false;
       invalidateCache();
       redraw();
       emit2();
     }
     function toggleEndpointsLock() {
       endpointsLocked.value = !endpointsLocked.value;
+      redraw();
+      emit2();
+    }
+    function toggleSnap() {
+      if (extSteps.value > 15) return;
+      snapToSteps.value = !snapToSteps.value;
       redraw();
       emit2();
     }
@@ -6974,7 +7010,15 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       invalidateCache();
       redraw();
     });
-    watch([extSteps, extMaxSigma], redraw);
+    watch(snapEnabled, redraw);
+    watch(extSteps, (newSteps) => {
+      if (newSteps > 15 && snapToSteps.value) {
+        snapToSteps.value = false;
+        emit2();
+      }
+      redraw();
+    });
+    watch(extMaxSigma, redraw);
     function syncCanvasSize() {
       const canvas = canvasRef.value;
       if (!canvas || !ctx) return false;
@@ -7057,16 +7101,22 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
               onClick: toggleEndpointsLock
             }, toDisplayString(endpointsLocked.value ? "⊠" : "⊡"), 11, _hoisted_6),
             createBaseVNode("button", {
+              class: normalizeClass(["nkd-btn-snap", { "nkd-btn-snap--active": snapEnabled.value, "nkd-btn-snap--disabled": extSteps.value > 15 }]),
+              disabled: extSteps.value > 15,
+              title: extSteps.value > 15 ? "Snap disponible solo hasta 15 pasos" : snapEnabled.value ? "Desactivar snap a pasos" : "Activar snap a pasos",
+              onClick: toggleSnap
+            }, "⊞", 10, _hoisted_7),
+            createBaseVNode("button", {
               class: "nkd-btn-reset",
               onClick: resetCurve
             }, "↺")
           ]),
-          createBaseVNode("div", _hoisted_7, [
-            createBaseVNode("span", _hoisted_8, "S: " + toDisplayString(extSteps.value) + " | σmax: " + toDisplayString(fmtSigma(extMaxSigma.value)), 1),
+          createBaseVNode("div", _hoisted_8, [
+            createBaseVNode("span", _hoisted_9, "S: " + toDisplayString(extSteps.value) + " | σmax: " + toDisplayString(fmtSigma(extMaxSigma.value)), 1),
             _cache[9] || (_cache[9] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
-            createBaseVNode("span", _hoisted_9, [
+            createBaseVNode("span", _hoisted_10, [
               _cache[8] || (_cache[8] = createTextVNode(" Click=add · Drag=move · Shift+click=delete", -1)),
-              !endpointsLocked.value ? (openBlock(), createElementBlock("span", _hoisted_10, " · Extremos libres")) : createCommentVNode("", true)
+              !endpointsLocked.value ? (openBlock(), createElementBlock("span", _hoisted_11, " · Extremos libres")) : createCommentVNode("", true)
             ])
           ])
         ]),
@@ -7092,7 +7142,7 @@ const _export_sfc = (sfc, props) => {
   }
   return target;
 };
-const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-a896ae4d"]]);
+const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-ca6ec281"]]);
 const NODE_NAME = "NKDSigmasCurve";
 const EXT_NAME = "NKD.SigmasCurve.Vue";
 app.registerExtension({
@@ -7233,7 +7283,7 @@ app.registerExtension({
   try {
     if (typeof document != "undefined") {
       var elementStyle = document.createElement("style");
-      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-a896ae4d] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-a896ae4d] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-a896ae4d] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-a896ae4d] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-a896ae4d]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-a896ae4d] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-a896ae4d] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-a896ae4d]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-a896ae4d] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-a896ae4d] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-a896ae4d] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-a896ae4d] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-a896ae4d] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-a896ae4d] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-a896ae4d]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock[data-v-a896ae4d] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-lock[data-v-a896ae4d]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock--unlocked[data-v-a896ae4d] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-info[data-v-a896ae4d] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-a896ae4d] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-a896ae4d] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
+      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-ca6ec281] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-ca6ec281] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-ca6ec281] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-ca6ec281] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-ca6ec281]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-ca6ec281] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-ca6ec281] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-ca6ec281]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-ca6ec281] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-ca6ec281] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-ca6ec281] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-ca6ec281] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-ca6ec281] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-ca6ec281] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-ca6ec281]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock[data-v-ca6ec281] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-lock[data-v-ca6ec281]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock--unlocked[data-v-ca6ec281] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn-snap[data-v-ca6ec281] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-snap[data-v-ca6ec281]:hover:not(:disabled) {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-snap--active[data-v-ca6ec281] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn-snap--disabled[data-v-ca6ec281],\r\n.nkd-btn-snap[data-v-ca6ec281]:disabled {\r\n  opacity: 0.3;\r\n  cursor: not-allowed;\n}\n.nkd-info[data-v-ca6ec281] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-ca6ec281] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-ca6ec281] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
       document.head.appendChild(elementStyle);
     }
   } catch (e) {
