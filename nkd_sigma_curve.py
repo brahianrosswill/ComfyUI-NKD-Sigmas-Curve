@@ -256,8 +256,8 @@ class NKDSigmaCurve(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id="NKDSigmasCurve",
-            display_name="NKD Sigmas Curve",
-            category="NKD Nodes/Sampling",
+            display_name="😺NKD Sigmas Curve",
+            category="😺NKD Nodes/Sampling",
             description=(
                 "Control sigma values interactively with a spline curve. "
                 "Left-click to add points · Shift+click to remove · Drag to move."
@@ -379,5 +379,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "NKDSigmasCurve": "NKD Sigmas Curve",
+    "NKDSigmasCurve": "😺NKD Sigmas Curve",
 }
