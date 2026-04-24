@@ -1,3 +1,4 @@
+
 # ComfyUI NKD Sigmas Curve
 
 >⚠️ **This is my first custom node, and I built the whole thing just vibecoding with Claude. To be honest, I have no clue what I'm doing. I'm just a monkey with a shotgun telling a robot to build what I want. Expect some bugs... or not. Who knows? It's a miracle this thing even works.**
@@ -52,6 +53,9 @@ You can now connect any SIGMAS output (from a scheduler, another curve node, any
 - The overlay appears automatically as soon as the node executes with a reference connected
 - Point tooltips now show the exact step and σ value while hovering or dragging
 - `max_sigma` widget precision increased to 3 decimal places
+
+
+https://github.com/user-attachments/assets/b91c680c-544b-4720-a5a1-1b43a5a807f6
 
 ### v1.2.0 — Snap to steps & progress dot
 
