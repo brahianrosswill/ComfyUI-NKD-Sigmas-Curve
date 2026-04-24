@@ -845,7 +845,7 @@ function initFromReference(): void {
   if (refMax === 0) return;
 
   // Sample at 5 evenly-spaced positions from the reference
-  const positions = [0, 0.25, 0.5, 0.75, 1.0];
+  const positions = [0, 1/6, 2/6, 3/6, 4/6, 5/6, 1.0];
   const newPts: Point[] = positions.map(t => {
     const idx = Math.round(t * (refs.length - 1));
     const ny  = Math.max(0, Math.min(1, refs[idx] / refMax));

@@ -281,7 +281,7 @@ class NKDSigmaCurve(io.ComfyNode):
                     "max_sigma",
                     default=1.0,
                     min=0.001,
-                    max=5000.0,
+                    max=1.0,
                     step=0.001,
                     round=False,
                     tooltip="Maximum sigma value — curve top (y=1) maps to this",
