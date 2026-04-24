@@ -6,7 +6,7 @@
       <div class="nkd-row nkd-row--controls">
 
         <!-- Interpolation mode -->
-        <span class="nkd-label">Modo</span>
+        <span class="nkd-label">Mode</span>
         <select v-model="interpolation" class="nkd-select" @change="onInterpChange">
           <option value="smooth">Smooth</option>
           <option value="linear">Linear</option>
@@ -30,32 +30,51 @@
 
         <!-- Endpoint lock/unlock toggle -->
         <button
-          class="nkd-btn-lock"
-          :class="{ 'nkd-btn-lock--unlocked': !endpointsLocked }"
-          :title="endpointsLocked ? 'Desbloquear extremos' : 'Bloquear extremos'"
+          class="nkd-btn"
+          :class="{ 'nkd-btn--active': !endpointsLocked }"
+          :title="endpointsLocked ? 'Unlock endpoints' : 'Lock endpoints'"
           @click="toggleEndpointsLock"
         >{{ endpointsLocked ? '⊠' : '⊡' }}</button>
 
         <!-- Snap to steps toggle (only available when steps <= 15) -->
         <button
-          class="nkd-btn-snap"
-          :class="{ 'nkd-btn-snap--active': snapEnabled, 'nkd-btn-snap--disabled': extSteps > 15 }"
+          class="nkd-btn"
+          :class="{ 'nkd-btn--active': snapEnabled, 'nkd-btn--disabled': extSteps > 15 }"
           :disabled="extSteps > 15"
-          :title="extSteps > 15 ? 'Snap disponible solo hasta 15 pasos' : snapEnabled ? 'Desactivar snap a pasos' : 'Activar snap a pasos'"
+          :title="extSteps > 15 ? 'Snap available up to 15 steps' : snapEnabled ? 'Disable snap to steps' : 'Enable snap to steps'"
           @click="toggleSnap"
         >⊞</button>
 
         <!-- Reset button -->
-        <button class="nkd-btn-reset" @click="resetCurve">↺</button>
+        <button class="nkd-btn" title="Reset curve" @click="resetCurve">↺</button>
 
       </div>
 
-      <!-- Row 2: hint + live info -->
+      <!-- Row 2: reference controls (only when a reference input is connected) -->
+      <div v-if="referenceConnected" class="nkd-row nkd-row--ref">
+        <span class="nkd-label">Ref</span>
+        <button
+          class="nkd-btn nkd-btn--ref"
+          :class="{ 'nkd-btn--active nkd-btn--ref-active': showReference, 'nkd-btn--disabled': !referenceSigmas }"
+          :disabled="!referenceSigmas"
+          :title="!referenceSigmas ? 'Run the node to load reference' : showReference ? 'Hide reference overlay' : 'Show reference overlay'"
+          @click="toggleReference"
+        >{{ showReference ? 'Hide' : 'Show' }}</button>
+        <button
+          class="nkd-btn nkd-btn--ref"
+          :class="{ 'nkd-btn--disabled': !referenceSigmas }"
+          :disabled="!referenceSigmas"
+          :title="!referenceSigmas ? 'Run the node to load reference' : 'Match curve to reference shape'"
+          @click="initFromReference"
+        >Match</button>
+      </div>
+
+      <!-- Row 3: hint + live info -->
       <div class="nkd-row nkd-row--hint">
         <span class="nkd-info">S: {{ extSteps }} | σmax: {{ fmtSigma(extMaxSigma) }}</span>
         <div class="nkd-spacer" />
         <span class="nkd-hint">
-          Click=add · Drag=move · Shift+click=delete<span v-if="!endpointsLocked"> · Extremos libres</span>
+          Click=add · Drag=move · Shift+click=delete<span v-if="!endpointsLocked"> · Endpoints unlocked</span>
         </span>
       </div>
     </div>
@@ -95,7 +114,7 @@ import { api } from "../../scripts/api.js";
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 
-const CW = 320;
+const CW = 400;
 const CH = 200;
 
 // Minimum internal render scale relative to logical dimensions.
@@ -132,9 +151,11 @@ type Point = [number, number, number];  // [x, y, w]
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 const props = defineProps<{
-  onChange?:       (json: string) => void;
-  stepsWidget?:    { value: number } | null;
-  maxSigmaWidget?: { value: number } | null;
+  onChange?:          (json: string) => void;
+  stepsWidget?:       { value: number } | null;
+  maxSigmaWidget?:    { value: number } | null;
+  refSigmasWidget?:   { value: number[] | null } | null;
+  onFetchReference?:  () => void;
 }>();
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -154,6 +175,11 @@ const dragging        = ref(false);
 const progressT       = ref<number | null>(null);   // null = no active execution
 const endpointsLocked = ref(true);                  // first/last points locked by default
 const snapToSteps     = ref(false);                 // snap X to step positions
+
+// Reference sigmas overlay
+const referenceConnected = ref(false);           // true as soon as a link is wired
+const referenceSigmas    = ref<number[] | null>(null);
+const showReference      = ref(false);
 
 // External widget values (live-read each draw)
 const extSteps    = computed(() => +(props.stepsWidget?.value    ?? 20));
@@ -465,6 +491,79 @@ function drawProgressDot(): void {
   ctx!.restore();
 }
 
+function drawReferenceCurve(): void {
+  const refs = referenceSigmas.value;
+  if (!refs || refs.length < 2) return;
+
+  // Normalise to [0, 1] relative to the reference's own max
+  const refMax = Math.max(...refs);
+  if (refMax === 0) return;
+
+  ctx!.save();
+  ctx!.strokeStyle = "rgba(255,180,60,0.55)";
+  ctx!.lineWidth   = 1.5;
+  ctx!.setLineDash([5, 4]);
+  ctx!.lineJoin    = "round";
+  ctx!.lineCap     = "round";
+  ctx!.beginPath();
+  const n = refs.length;
+  for (let i = 0; i < n; i++) {
+    const t  = i / (n - 1);
+    const ny = Math.max(0, Math.min(1, refs[i] / refMax));
+    const cx = toCanvasX(t);
+    const cy = toCanvasY(ny);
+    i === 0 ? ctx!.moveTo(cx, cy) : ctx!.lineTo(cx, cy);
+  }
+  ctx!.stroke();
+  ctx!.restore();
+}
+
+function drawPointTooltip(): void {
+  const idx = dragging.value ? dragIdx.value : hoverIdx.value;
+  if (idx < 0 || idx >= points.value.length) return;
+
+  const pt  = points.value[idx];
+  const cx  = toCanvasX(pt[0]);
+  const cy  = toCanvasY(pt[1]);
+  const ms  = extMaxSigma.value;
+  const steps = extSteps.value;
+
+  const stepVal  = Math.round(pt[0] * steps);
+  const sigmaVal = (pt[1] * ms).toFixed(3);
+  const label    = `step ${stepVal}  σ ${sigmaVal}`;
+
+  const PAD_X = 6, PAD_Y = 4;
+  const FONT  = "10px monospace";
+  ctx!.save();
+  ctx!.font = FONT;
+  const tw = ctx!.measureText(label).width;
+  const bw = tw + PAD_X * 2;
+  const bh = 14 + PAD_Y * 2;  // line-height + vertical padding
+
+  // Position: above the point, flip to below near top edge
+  let bx = cx - bw / 2;
+  let by = cy - bh - 10;
+  if (by < PAD.top) by = cy + 12;
+  // Clamp horizontally
+  bx = Math.max(PAD.left, Math.min(bx, PAD.left + IW - bw));
+
+  // Background pill
+  ctx!.fillStyle   = "rgba(15,18,26,0.88)";
+  ctx!.strokeStyle = dragging.value ? "rgba(255,107,107,0.6)" : "rgba(74,180,255,0.5)";
+  ctx!.lineWidth   = 1;
+  ctx!.beginPath();
+  ctx!.roundRect(bx, by, bw, bh, 4);
+  ctx!.fill();
+  ctx!.stroke();
+
+  // Text
+  ctx!.fillStyle   = "#e8eef8";
+  ctx!.textAlign   = "left";
+  ctx!.textBaseline = "middle";
+  ctx!.fillText(label, bx + PAD_X, by + bh / 2);
+  ctx!.restore();
+}
+
 function redraw(): void {
   if (!ctx) return;
   ctx.clearRect(0, 0, CW, CH);
@@ -472,11 +571,13 @@ function redraw(): void {
   drawGrid();
   drawSnapGrid();
   drawAxisLabels();
+  if (showReference.value) drawReferenceCurve();
   drawFill();
   drawCurve();
   if (interpolation.value === "smooth") drawControlPolygon();
   drawPoints();
   drawProgressDot();
+  drawPointTooltip();
 }
 
 function drawBg(): void {
@@ -551,7 +652,7 @@ function drawAxisLabels(): void {
   ctx!.textBaseline = "middle";
   [0, 0.25, 0.5, 0.75, 1].forEach(v => {
     ctx!.fillStyle = (v === 0 || v === 1) ? C.axisLabel : C.axisLabelDim;
-    ctx!.fillText((v * ms).toFixed(2), PAD.left - 4, toCanvasY(v));
+    ctx!.fillText((v * ms).toFixed(3), PAD.left - 4, toCanvasY(v));
   });
 
   // X-axis (step numbers)
@@ -731,6 +832,46 @@ function toggleSnap(): void {
   emit();
 }
 
+function toggleReference(): void {
+  showReference.value = !showReference.value;
+  redraw();
+}
+
+function initFromReference(): void {
+  const refs = referenceSigmas.value;
+  if (!refs || refs.length < 2) return;
+
+  const refMax = Math.max(...refs);
+  if (refMax === 0) return;
+
+  // Sample at 5 evenly-spaced positions from the reference
+  const positions = [0, 0.25, 0.5, 0.75, 1.0];
+  const newPts: Point[] = positions.map(t => {
+    const idx = Math.round(t * (refs.length - 1));
+    const ny  = Math.max(0, Math.min(1, refs[idx] / refMax));
+    return [t, ny, tension.value] as Point;
+  });
+
+  points.value = newPts;
+  invalidateCache(); redraw(); emit();
+}
+
+/** Called from main.ts when the reference link is connected/disconnected or data arrives. */
+function setReferenceSigmas(values: number[] | null): void {
+  referenceSigmas.value = values;
+  showReference.value = values !== null;
+  redraw();
+}
+
+function setReferenceConnected(connected: boolean): void {
+  referenceConnected.value = connected;
+  if (!connected) {
+    referenceSigmas.value = null;
+    showReference.value   = false;
+    redraw();
+  }
+}
+
 // ── Progress listeners ────────────────────────────────────────────────────────
 
 function clearProgress(): void {
@@ -775,7 +916,7 @@ function cleanup(): void {
   api.removeEventListener("execution_interrupted", clearProgress);
 }
 
-defineExpose({ serialise, deserialise, cleanup, forceResize });
+defineExpose({ serialise, deserialise, cleanup, forceResize, setReferenceSigmas, setReferenceConnected });
 
 function emit(): void { props.onChange?.(serialise()); }
 
@@ -884,6 +1025,7 @@ onMounted(() => {
 }
 
 .nkd-row--controls { padding: 5px 7px 3px; }
+.nkd-row--ref      { padding: 2px 7px 3px; border-top: 1px solid rgba(255,180,60,0.12); }
 .nkd-row--hint     { padding: 2px 7px 4px; }
 
 .nkd-label {
@@ -932,62 +1074,41 @@ onMounted(() => {
 
 .nkd-spacer { flex: 1; min-width: 4px; }
 
-.nkd-btn-reset {
-  font-size: 12px;
+/* ── Unified button base ── */
+.nkd-btn {
+  font-size: 11px;
+  font-family: sans-serif;
   background: #252830;
   border: 1px solid #3a3d46;
   color: rgba(255,255,255,0.55);
   border-radius: 4px;
   padding: 1px 7px;
   cursor: pointer;
-  line-height: 1.4;
+  line-height: 1.5;
+  white-space: nowrap;
 }
-.nkd-btn-reset:hover {
+.nkd-btn:hover:not(:disabled) {
   border-color: #4ab4ff;
   color: rgba(255,255,255,0.85);
 }
-
-.nkd-btn-lock {
-  font-size: 12px;
-  background: #252830;
-  border: 1px solid #3a3d46;
-  color: rgba(255,255,255,0.55);
-  border-radius: 4px;
-  padding: 1px 7px;
-  cursor: pointer;
-  line-height: 1.4;
-}
-.nkd-btn-lock:hover {
-  border-color: #4ab4ff;
-  color: rgba(255,255,255,0.85);
-}
-.nkd-btn-lock--unlocked {
+.nkd-btn--active {
   border-color: #4ab4ff;
   color: #4ab4ff;
 }
-
-.nkd-btn-snap {
-  font-size: 12px;
-  background: #252830;
-  border: 1px solid #3a3d46;
-  color: rgba(255,255,255,0.55);
-  border-radius: 4px;
-  padding: 1px 7px;
-  cursor: pointer;
-  line-height: 1.4;
-}
-.nkd-btn-snap:hover:not(:disabled) {
-  border-color: #4ab4ff;
-  color: rgba(255,255,255,0.85);
-}
-.nkd-btn-snap--active {
-  border-color: #4ab4ff;
-  color: #4ab4ff;
-}
-.nkd-btn-snap--disabled,
-.nkd-btn-snap:disabled {
+.nkd-btn:disabled,
+.nkd-btn--disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+/* Reference-row buttons use amber accent instead of blue */
+.nkd-btn--ref:hover:not(:disabled) {
+  border-color: #ffb43c;
+  color: rgba(255,255,255,0.85);
+}
+.nkd-btn--ref-active {
+  border-color: #ffb43c;
+  color: #ffb43c;
 }
 
 .nkd-info {

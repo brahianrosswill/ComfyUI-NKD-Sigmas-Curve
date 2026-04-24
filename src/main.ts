@@ -12,6 +12,7 @@
 
 import { createApp, reactive } from "vue";
 import { app as comfyApp } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 import SigmaCurveWidget from "@/SigmaCurveWidget.vue";
 
 const NODE_NAME = "NKDSigmasCurve";
@@ -64,13 +65,58 @@ comfyApp.registerExtension({
           if (curveDataWidget) curveDataWidget.value = json;
           this.setDirtyCanvas(true);
         },
-        stepsWidget:    stepsProxy,
-        maxSigmaWidget: maxSigmaProxy,
+        stepsWidget:       stepsProxy,
+        maxSigmaWidget:    maxSigmaProxy,
+        onFetchReference:  () => fetchReference(),
       });
 
       const instance = vueApp.mount(container) as InstanceType<
         typeof SigmaCurveWidget
       >;
+
+      // ── Reference sigmas: read from the connected node's output ─────
+      // When a SIGMAS source is connected to our reference_sigmas input,
+      // we listen for `executed` events and extract the tensor values from
+      // the upstream node's output so the Vue widget can draw the overlay.
+      const self = this;
+      function onExecuted(e: Event): void {
+        // The Python node sends reference_sigmas back as UI metadata in its
+        // own executed event. We only care about events from our own node id.
+        const detail = (e as CustomEvent).detail as {
+          output?: Record<string, unknown>;
+          node?: string | number;
+        };
+        if (String(detail?.node) !== String(self.id)) return;
+
+        const refVals = detail?.output?.["reference_sigmas"];
+        if (Array.isArray(refVals) && refVals.length > 0) {
+          instance.setReferenceSigmas?.(refVals.flat().map(Number));
+        }
+      }
+
+      function fetchReference(): void {
+        const refInput = self.inputs?.find((inp: any) => inp.name === "reference_sigmas");
+        if (!refInput?.link) return;
+        const linksMap = comfyApp.graph.links;
+        const link = (linksMap instanceof Map)
+          ? linksMap.get(refInput.link)
+          : linksMap[refInput.link];
+        if (!link) return;
+        // Queue only our own node as the target — ComfyUI will walk upstream
+        // dependencies automatically to satisfy the reference_sigmas input.
+        comfyApp.queuePrompt(0, 1, [self.id]);
+      }
+
+      api.addEventListener("executed", onExecuted);
+
+      // Clear reference overlay when the link is removed
+      const origConnectChange = this.onConnectionsChange;
+      this.onConnectionsChange = function (this: any) {
+        origConnectChange?.apply(this, arguments as any);
+        const refInput = self.inputs?.find((inp: any) => inp.name === "reference_sigmas");
+        const connected = !!refInput?.link;
+        instance.setReferenceConnected?.(connected);
+      };
 
       // ── Sync widget values into the reactive proxies ─────────────────
       // Primary path (v1 + v2): chain onto each widget's callback, which
@@ -108,7 +154,7 @@ comfyApp.registerExtension({
       };
 
       // Canvas logical dimensions (must match SigmaCurveWidget.vue constants)
-      const CANVAS_W  = 320;
+      const CANVAS_W  = 400;
       const CANVAS_H  = 200;
       const CANVAS_AR = CANVAS_H / CANVAS_W; // 0.625
 
@@ -183,14 +229,19 @@ comfyApp.registerExtension({
       // Measure the real controls-bar height after the DOM is rendered, update
       // barH (both closures above already reference it), then force the node to
       // adopt the corrected size so the border always wraps the content.
-      requestAnimationFrame(() => {
+      const remeasureBar = () => {
         const barEl = container.querySelector(".nkd-bar") as HTMLElement | null;
         const measured = barEl ? Math.ceil(barEl.getBoundingClientRect().height) : 0;
-        if (measured > 0) barH = measured;
+        if (measured > 0 && measured !== barH) {
+          barH = measured;
+          const sz = this.computeSize(this.size[0]);
+          this.setSize(sz);
+          this.setDirtyCanvas(true, true);
+        }
+      };
 
-        // Drive initial canvas resize from the real CSS dimensions now that
-        // the DOM has been laid out. This is the primary trigger for v1 mode
-        // where the ResizeObserver may fire before the widget has its final size.
+      requestAnimationFrame(() => {
+        remeasureBar();
         if (instance.forceResize?.()) v1NeedsInit = false;
 
         const sz = this.computeSize(this.size[0]);
@@ -198,9 +249,18 @@ comfyApp.registerExtension({
         this.setDirtyCanvas(true, true);
       });
 
+      // Re-measure whenever the bar grows or shrinks (e.g. reference row appearing)
+      const barObserver = new ResizeObserver(remeasureBar);
+      requestAnimationFrame(() => {
+        const barEl = container.querySelector(".nkd-bar") as HTMLElement | null;
+        if (barEl) barObserver.observe(barEl);
+      });
+
       // Clean up the Vue app when the node is removed
       const origRemoved = this.onRemoved;
       this.onRemoved = function (this: any) {
+        api.removeEventListener("executed", onExecuted);
+        barObserver.disconnect();
         instance.cleanup?.();
         vueApp.unmount();
         origRemoved?.apply(this, arguments as any);

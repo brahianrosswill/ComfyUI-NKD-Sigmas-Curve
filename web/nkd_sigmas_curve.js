@@ -6418,11 +6418,17 @@ const _hoisted_4 = { class: "nkd-group" };
 const _hoisted_5 = { class: "nkd-mono" };
 const _hoisted_6 = ["title"];
 const _hoisted_7 = ["disabled", "title"];
-const _hoisted_8 = { class: "nkd-row nkd-row--hint" };
-const _hoisted_9 = { class: "nkd-info" };
-const _hoisted_10 = { class: "nkd-hint" };
-const _hoisted_11 = { key: 0 };
-const CW = 320;
+const _hoisted_8 = {
+  key: 0,
+  class: "nkd-row nkd-row--ref"
+};
+const _hoisted_9 = ["disabled", "title"];
+const _hoisted_10 = ["disabled", "title"];
+const _hoisted_11 = { class: "nkd-row nkd-row--hint" };
+const _hoisted_12 = { class: "nkd-info" };
+const _hoisted_13 = { class: "nkd-hint" };
+const _hoisted_14 = { key: 0 };
+const CW = 400;
 const CH = 200;
 const MIN_RENDER_SCALE = 2;
 const HIT_R = 10;
@@ -6433,7 +6439,9 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
   props: {
     onChange: { type: Function },
     stepsWidget: {},
-    maxSigmaWidget: {}
+    maxSigmaWidget: {},
+    refSigmasWidget: {},
+    onFetchReference: { type: Function }
   },
   setup(__props, { expose: __expose }) {
     const PAD = { top: 16, right: 14, bottom: 22, left: 42 };
@@ -6467,6 +6475,9 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     const progressT = /* @__PURE__ */ ref(null);
     const endpointsLocked = /* @__PURE__ */ ref(true);
     const snapToSteps = /* @__PURE__ */ ref(false);
+    const referenceConnected = /* @__PURE__ */ ref(false);
+    const referenceSigmas = /* @__PURE__ */ ref(null);
+    const showReference = /* @__PURE__ */ ref(false);
     const extSteps = computed(() => {
       var _a;
       return +(((_a = props.stepsWidget) == null ? void 0 : _a.value) ?? 20);
@@ -6735,6 +6746,64 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       ctx.fill();
       ctx.restore();
     }
+    function drawReferenceCurve() {
+      const refs = referenceSigmas.value;
+      if (!refs || refs.length < 2) return;
+      const refMax = Math.max(...refs);
+      if (refMax === 0) return;
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,180,60,0.55)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      const n = refs.length;
+      for (let i = 0; i < n; i++) {
+        const t = i / (n - 1);
+        const ny = Math.max(0, Math.min(1, refs[i] / refMax));
+        const cx = toCanvasX(t);
+        const cy = toCanvasY(ny);
+        i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+    function drawPointTooltip() {
+      const idx = dragging.value ? dragIdx.value : hoverIdx.value;
+      if (idx < 0 || idx >= points.value.length) return;
+      const pt = points.value[idx];
+      const cx = toCanvasX(pt[0]);
+      const cy = toCanvasY(pt[1]);
+      const ms = extMaxSigma.value;
+      const steps = extSteps.value;
+      const stepVal = Math.round(pt[0] * steps);
+      const sigmaVal = (pt[1] * ms).toFixed(3);
+      const label = `step ${stepVal}  σ ${sigmaVal}`;
+      const PAD_X = 6, PAD_Y = 4;
+      const FONT = "10px monospace";
+      ctx.save();
+      ctx.font = FONT;
+      const tw = ctx.measureText(label).width;
+      const bw = tw + PAD_X * 2;
+      const bh = 14 + PAD_Y * 2;
+      let bx = cx - bw / 2;
+      let by = cy - bh - 10;
+      if (by < PAD.top) by = cy + 12;
+      bx = Math.max(PAD.left, Math.min(bx, PAD.left + IW - bw));
+      ctx.fillStyle = "rgba(15,18,26,0.88)";
+      ctx.strokeStyle = dragging.value ? "rgba(255,107,107,0.6)" : "rgba(74,180,255,0.5)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bw, bh, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#e8eef8";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, bx + PAD_X, by + bh / 2);
+      ctx.restore();
+    }
     function redraw() {
       if (!ctx) return;
       ctx.clearRect(0, 0, CW, CH);
@@ -6742,11 +6811,13 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       drawGrid();
       drawSnapGrid();
       drawAxisLabels();
+      if (showReference.value) drawReferenceCurve();
       drawFill();
       drawCurve();
       if (interpolation.value === "smooth") drawControlPolygon();
       drawPoints();
       drawProgressDot();
+      drawPointTooltip();
     }
     function drawBg() {
       ctx.fillStyle = C.bg;
@@ -6816,7 +6887,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       ctx.textBaseline = "middle";
       [0, 0.25, 0.5, 0.75, 1].forEach((v) => {
         ctx.fillStyle = v === 0 || v === 1 ? C.axisLabel : C.axisLabelDim;
-        ctx.fillText((v * ms).toFixed(2), PAD.left - 4, toCanvasY(v));
+        ctx.fillText((v * ms).toFixed(3), PAD.left - 4, toCanvasY(v));
       });
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -6974,6 +7045,39 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       redraw();
       emit2();
     }
+    function toggleReference() {
+      showReference.value = !showReference.value;
+      redraw();
+    }
+    function initFromReference() {
+      const refs = referenceSigmas.value;
+      if (!refs || refs.length < 2) return;
+      const refMax = Math.max(...refs);
+      if (refMax === 0) return;
+      const positions = [0, 0.25, 0.5, 0.75, 1];
+      const newPts = positions.map((t) => {
+        const idx = Math.round(t * (refs.length - 1));
+        const ny = Math.max(0, Math.min(1, refs[idx] / refMax));
+        return [t, ny, tension.value];
+      });
+      points.value = newPts;
+      invalidateCache();
+      redraw();
+      emit2();
+    }
+    function setReferenceSigmas(values) {
+      referenceSigmas.value = values;
+      showReference.value = values !== null;
+      redraw();
+    }
+    function setReferenceConnected(connected) {
+      referenceConnected.value = connected;
+      if (!connected) {
+        referenceSigmas.value = null;
+        showReference.value = false;
+        redraw();
+      }
+    }
     function clearProgress() {
       progressT.value = null;
       redraw();
@@ -7010,7 +7114,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       api.removeEventListener("execution_error", clearProgress);
       api.removeEventListener("execution_interrupted", clearProgress);
     }
-    __expose({ serialise, deserialise, cleanup, forceResize });
+    __expose({ serialise, deserialise, cleanup, forceResize, setReferenceSigmas, setReferenceConnected });
     function emit2() {
       var _a;
       (_a = props.onChange) == null ? void 0 : _a.call(props, serialise());
@@ -7069,7 +7173,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       return openBlock(), createElementBlock("div", _hoisted_1, [
         createBaseVNode("div", _hoisted_2, [
           createBaseVNode("div", _hoisted_3, [
-            _cache[5] || (_cache[5] = createBaseVNode("span", { class: "nkd-label" }, "Modo", -1)),
+            _cache[5] || (_cache[5] = createBaseVNode("span", { class: "nkd-label" }, "Mode", -1)),
             withDirectives(createBaseVNode("select", {
               "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => interpolation.value = $event),
               class: "nkd-select",
@@ -7105,27 +7209,43 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
             ]),
             _cache[7] || (_cache[7] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
             createBaseVNode("button", {
-              class: normalizeClass(["nkd-btn-lock", { "nkd-btn-lock--unlocked": !endpointsLocked.value }]),
-              title: endpointsLocked.value ? "Desbloquear extremos" : "Bloquear extremos",
+              class: normalizeClass(["nkd-btn", { "nkd-btn--active": !endpointsLocked.value }]),
+              title: endpointsLocked.value ? "Unlock endpoints" : "Lock endpoints",
               onClick: toggleEndpointsLock
             }, toDisplayString(endpointsLocked.value ? "⊠" : "⊡"), 11, _hoisted_6),
             createBaseVNode("button", {
-              class: normalizeClass(["nkd-btn-snap", { "nkd-btn-snap--active": snapEnabled.value, "nkd-btn-snap--disabled": extSteps.value > 15 }]),
+              class: normalizeClass(["nkd-btn", { "nkd-btn--active": snapEnabled.value, "nkd-btn--disabled": extSteps.value > 15 }]),
               disabled: extSteps.value > 15,
-              title: extSteps.value > 15 ? "Snap disponible solo hasta 15 pasos" : snapEnabled.value ? "Desactivar snap a pasos" : "Activar snap a pasos",
+              title: extSteps.value > 15 ? "Snap available up to 15 steps" : snapEnabled.value ? "Disable snap to steps" : "Enable snap to steps",
               onClick: toggleSnap
             }, "⊞", 10, _hoisted_7),
             createBaseVNode("button", {
-              class: "nkd-btn-reset",
+              class: "nkd-btn",
+              title: "Reset curve",
               onClick: resetCurve
             }, "↺")
           ]),
-          createBaseVNode("div", _hoisted_8, [
-            createBaseVNode("span", _hoisted_9, "S: " + toDisplayString(extSteps.value) + " | σmax: " + toDisplayString(fmtSigma(extMaxSigma.value)), 1),
-            _cache[9] || (_cache[9] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
-            createBaseVNode("span", _hoisted_10, [
-              _cache[8] || (_cache[8] = createTextVNode(" Click=add · Drag=move · Shift+click=delete", -1)),
-              !endpointsLocked.value ? (openBlock(), createElementBlock("span", _hoisted_11, " · Extremos libres")) : createCommentVNode("", true)
+          referenceConnected.value ? (openBlock(), createElementBlock("div", _hoisted_8, [
+            _cache[8] || (_cache[8] = createBaseVNode("span", { class: "nkd-label" }, "Ref", -1)),
+            createBaseVNode("button", {
+              class: normalizeClass(["nkd-btn nkd-btn--ref", { "nkd-btn--active nkd-btn--ref-active": showReference.value, "nkd-btn--disabled": !referenceSigmas.value }]),
+              disabled: !referenceSigmas.value,
+              title: !referenceSigmas.value ? "Run the node to load reference" : showReference.value ? "Hide reference overlay" : "Show reference overlay",
+              onClick: toggleReference
+            }, toDisplayString(showReference.value ? "Hide" : "Show"), 11, _hoisted_9),
+            createBaseVNode("button", {
+              class: normalizeClass(["nkd-btn nkd-btn--ref", { "nkd-btn--disabled": !referenceSigmas.value }]),
+              disabled: !referenceSigmas.value,
+              title: !referenceSigmas.value ? "Run the node to load reference" : "Match curve to reference shape",
+              onClick: initFromReference
+            }, "Match", 10, _hoisted_10)
+          ])) : createCommentVNode("", true),
+          createBaseVNode("div", _hoisted_11, [
+            createBaseVNode("span", _hoisted_12, "S: " + toDisplayString(extSteps.value) + " | σmax: " + toDisplayString(fmtSigma(extMaxSigma.value)), 1),
+            _cache[10] || (_cache[10] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
+            createBaseVNode("span", _hoisted_13, [
+              _cache[9] || (_cache[9] = createTextVNode(" Click=add · Drag=move · Shift+click=delete", -1)),
+              !endpointsLocked.value ? (openBlock(), createElementBlock("span", _hoisted_14, " · Endpoints unlocked")) : createCommentVNode("", true)
             ])
           ])
         ]),
@@ -7151,7 +7271,7 @@ const _export_sfc = (sfc, props) => {
   }
   return target;
 };
-const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-ab2fdd1a"]]);
+const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-b562e03e"]]);
 const NODE_NAME = "NKDSigmasCurve";
 const EXT_NAME = "NKD.SigmasCurve.Vue";
 app.registerExtension({
@@ -7183,9 +7303,38 @@ app.registerExtension({
           this.setDirtyCanvas(true);
         },
         stepsWidget: stepsProxy,
-        maxSigmaWidget: maxSigmaProxy
+        maxSigmaWidget: maxSigmaProxy,
+        onFetchReference: () => fetchReference()
       });
       const instance = vueApp.mount(container);
+      const self2 = this;
+      function onExecuted(e) {
+        var _a2, _b2;
+        const detail = e.detail;
+        if (String(detail == null ? void 0 : detail.node) !== String(self2.id)) return;
+        const refVals = (_a2 = detail == null ? void 0 : detail.output) == null ? void 0 : _a2["reference_sigmas"];
+        if (Array.isArray(refVals) && refVals.length > 0) {
+          (_b2 = instance.setReferenceSigmas) == null ? void 0 : _b2.call(instance, refVals.flat().map(Number));
+        }
+      }
+      function fetchReference() {
+        var _a2;
+        const refInput = (_a2 = self2.inputs) == null ? void 0 : _a2.find((inp) => inp.name === "reference_sigmas");
+        if (!(refInput == null ? void 0 : refInput.link)) return;
+        const linksMap = app.graph.links;
+        const link = linksMap instanceof Map ? linksMap.get(refInput.link) : linksMap[refInput.link];
+        if (!link) return;
+        app.queuePrompt(0, 1, [self2.id]);
+      }
+      api.addEventListener("executed", onExecuted);
+      const origConnectChange = this.onConnectionsChange;
+      this.onConnectionsChange = function() {
+        var _a2, _b2;
+        origConnectChange == null ? void 0 : origConnectChange.apply(this, arguments);
+        const refInput = (_a2 = self2.inputs) == null ? void 0 : _a2.find((inp) => inp.name === "reference_sigmas");
+        const connected = !!(refInput == null ? void 0 : refInput.link);
+        (_b2 = instance.setReferenceConnected) == null ? void 0 : _b2.call(instance, connected);
+      };
       if (stepsWidget) {
         const origCb = stepsWidget.callback;
         stepsWidget.callback = function(value) {
@@ -7211,7 +7360,7 @@ app.registerExtension({
           maxSigmaProxy.value = maxSigmaWidget.value;
         if (v1NeedsInit && ((_a2 = instance.forceResize) == null ? void 0 : _a2.call(instance))) v1NeedsInit = false;
       };
-      const CANVAS_W = 320;
+      const CANVAS_W = 400;
       const CANVAS_H = 200;
       const CANVAS_AR = CANVAS_H / CANVAS_W;
       let barH = 50;
@@ -7266,19 +7415,34 @@ app.registerExtension({
         if (saved) instance.deserialise(saved);
         if ((_a2 = instance.forceResize) == null ? void 0 : _a2.call(instance)) v1NeedsInit = false;
       };
-      requestAnimationFrame(() => {
-        var _a2;
+      const remeasureBar = () => {
         const barEl = container.querySelector(".nkd-bar");
         const measured = barEl ? Math.ceil(barEl.getBoundingClientRect().height) : 0;
-        if (measured > 0) barH = measured;
+        if (measured > 0 && measured !== barH) {
+          barH = measured;
+          const sz = this.computeSize(this.size[0]);
+          this.setSize(sz);
+          this.setDirtyCanvas(true, true);
+        }
+      };
+      requestAnimationFrame(() => {
+        var _a2;
+        remeasureBar();
         if ((_a2 = instance.forceResize) == null ? void 0 : _a2.call(instance)) v1NeedsInit = false;
         const sz = this.computeSize(this.size[0]);
         this.setSize(sz);
         this.setDirtyCanvas(true, true);
       });
+      const barObserver = new ResizeObserver(remeasureBar);
+      requestAnimationFrame(() => {
+        const barEl = container.querySelector(".nkd-bar");
+        if (barEl) barObserver.observe(barEl);
+      });
       const origRemoved = this.onRemoved;
       this.onRemoved = function() {
         var _a2;
+        api.removeEventListener("executed", onExecuted);
+        barObserver.disconnect();
         (_a2 = instance.cleanup) == null ? void 0 : _a2.call(instance);
         vueApp.unmount();
         origRemoved == null ? void 0 : origRemoved.apply(this, arguments);
@@ -7292,7 +7456,7 @@ app.registerExtension({
   try {
     if (typeof document != "undefined") {
       var elementStyle = document.createElement("style");
-      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-ab2fdd1a] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-ab2fdd1a] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-ab2fdd1a] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-ab2fdd1a] { padding: 5px 7px 3px;\n}\n.nkd-row--hint[data-v-ab2fdd1a]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-ab2fdd1a] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-ab2fdd1a] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-ab2fdd1a]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-ab2fdd1a] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-ab2fdd1a] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-ab2fdd1a] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-ab2fdd1a] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-ab2fdd1a] { flex: 1; min-width: 4px;\n}\n.nkd-btn-reset[data-v-ab2fdd1a] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-reset[data-v-ab2fdd1a]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock[data-v-ab2fdd1a] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-lock[data-v-ab2fdd1a]:hover {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-lock--unlocked[data-v-ab2fdd1a] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn-snap[data-v-ab2fdd1a] {\r\n  font-size: 12px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.4;\n}\n.nkd-btn-snap[data-v-ab2fdd1a]:hover:not(:disabled) {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn-snap--active[data-v-ab2fdd1a] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn-snap--disabled[data-v-ab2fdd1a],\r\n.nkd-btn-snap[data-v-ab2fdd1a]:disabled {\r\n  opacity: 0.3;\r\n  cursor: not-allowed;\n}\n.nkd-info[data-v-ab2fdd1a] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-ab2fdd1a] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-ab2fdd1a] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
+      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-b562e03e] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-b562e03e] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-b562e03e] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-b562e03e] { padding: 5px 7px 3px;\n}\n.nkd-row--ref[data-v-b562e03e]      { padding: 2px 7px 3px; border-top: 1px solid rgba(255,180,60,0.12);\n}\n.nkd-row--hint[data-v-b562e03e]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-b562e03e] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-b562e03e] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-b562e03e]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-b562e03e] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-b562e03e] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-b562e03e] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-b562e03e] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-b562e03e] { flex: 1; min-width: 4px;\n}\r\n\r\n/* ── Unified button base ── */\n.nkd-btn[data-v-b562e03e] {\r\n  font-size: 11px;\r\n  font-family: sans-serif;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.5;\r\n  white-space: nowrap;\n}\n.nkd-btn[data-v-b562e03e]:hover:not(:disabled) {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn--active[data-v-b562e03e] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn[data-v-b562e03e]:disabled,\r\n.nkd-btn--disabled[data-v-b562e03e] {\r\n  opacity: 0.3;\r\n  cursor: not-allowed;\n}\r\n\r\n/* Reference-row buttons use amber accent instead of blue */\n.nkd-btn--ref[data-v-b562e03e]:hover:not(:disabled) {\r\n  border-color: #ffb43c;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn--ref-active[data-v-b562e03e] {\r\n  border-color: #ffb43c;\r\n  color: #ffb43c;\n}\n.nkd-info[data-v-b562e03e] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-b562e03e] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-b562e03e] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
       document.head.appendChild(elementStyle);
     }
   } catch (e) {

@@ -258,6 +258,7 @@ class NKDSigmaCurve(io.ComfyNode):
             node_id="NKDSigmasCurve",
             display_name="😺NKD Sigmas Curve",
             category="😺NKD Nodes/Sampling",
+            is_output_node=True,
             description=(
                 "Control sigma values interactively with a spline curve. "
                 "Left-click to add points · Shift+click to remove · Drag to move."
@@ -281,9 +282,14 @@ class NKDSigmaCurve(io.ComfyNode):
                     default=1.0,
                     min=0.001,
                     max=5000.0,
-                    step=0.01,
+                    step=0.001,
                     round=False,
                     tooltip="Maximum sigma value — curve top (y=1) maps to this",
+                ),
+                io.Sigmas.Input(
+                    "reference_sigmas",
+                    optional=True,
+                    tooltip="Optional reference sigmas to display as a ghost overlay in the curve editor",
                 ),
             ],
             outputs=[
@@ -298,6 +304,7 @@ class NKDSigmaCurve(io.ComfyNode):
         curve_data: str,
         steps: int,
         max_sigma: float,
+        reference_sigmas: torch.Tensor | None = None,
     ) -> io.NodeOutput:
         """
         Sample the curve and return a SIGMAS tensor and a float list, both of
@@ -357,7 +364,14 @@ class NKDSigmaCurve(io.ComfyNode):
         sigma_values[-1] = 0.0
 
         sigmas = torch.FloatTensor(sigma_values)
-        return io.NodeOutput(sigmas, sigma_values)
+
+        # Pass reference sigmas back to the frontend as UI metadata so the
+        # curve editor can draw the ghost overlay without polling the backend.
+        ui_extra: dict = {}
+        if reference_sigmas is not None:
+            ui_extra["reference_sigmas"] = reference_sigmas.tolist()
+
+        return io.NodeOutput(sigmas, sigma_values, ui=ui_extra)
 
 
 # ─── V3 Extension entrypoint ──────────────────────────────────────────────────

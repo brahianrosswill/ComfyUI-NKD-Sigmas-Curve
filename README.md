@@ -43,6 +43,18 @@ This is all with a fixed seed. As you can see, specially in the las 2 generation
 
 ## Updates
 
+### v1.3.0 — Reference overlay
+
+You can now connect any SIGMAS output (from a scheduler, another curve node, anything) to the new **reference_sigmas** input. Once you run the node, a ghost curve appears on the canvas so you can compare your design against the reference at a glance.
+
+- **Show / Hide** — toggle the reference overlay on and off
+- **Match** — copy the reference shape into your curve as editable control points, so you can use it as a starting point and tweak from there
+- The overlay appears automatically as soon as the node executes with a reference connected
+- Point tooltips now show the exact step and σ value while hovering or dragging
+- `max_sigma` widget precision increased to 3 decimal places
+
+### v1.2.0 — Snap to steps & progress dot
+
 Now it shows the progress in real time, so you can make better decisions 🫡
 
 https://github.com/user-attachments/assets/42c3c7af-4d89-43c1-bb6d-d623547c8e5d
