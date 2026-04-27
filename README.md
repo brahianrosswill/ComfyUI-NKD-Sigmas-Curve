@@ -11,14 +11,6 @@ A ComfyUI custom node that replaces trial-and-error sigma tuning with a visual, 
 
 It’s all about control. Standard schedulers (Karras, exponential, etc.) give you a fixed curve shape (nothing wrong with that) but once you unlock the power of custom sigmas, you can decide exactly how you want to denoise the image. That gives you fine-grained control over composition, details, and a bunch of nerdy stuff.
 
-I’ve been using [Custom Sigma Editor](https://github.com/JoeNavark/comfyui_custom_sigma_editor.git) for months and I love it, but it’s not compatible with Nodes 2.0, so """I built""" (Claude did 🤫) my own version inspired by it.
-
-https://github.com/user-attachments/assets/ee3e5b04-c5ab-4c67-9840-fa64a70db6cd
-
-
-
-## My version 👇🏻
-
 https://github.com/user-attachments/assets/281fa043-0900-4e7b-883d-1018953b01e0
 
 This is all with a fixed seed. As you can see, specially in the las 2 generations. Tuning the sigma curve lets you nail the shapes and details at just the right moment during generation. For instance, I use it to swap out a bare chest for a T-shirt on the fly.
@@ -97,6 +89,9 @@ npm install
 npm run build   # outputs to web/nkd_sigma_curve.js
 npm run dev     # watch mode
 ```
+
+## Inspired by
+[Custom Sigma Editor](https://github.com/JoeNavark/comfyui_custom_sigma_editor.git)
 
 ## License
 
