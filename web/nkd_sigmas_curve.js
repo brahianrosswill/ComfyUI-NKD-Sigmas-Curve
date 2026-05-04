@@ -7311,7 +7311,9 @@ app.registerExtension({
       function onExecuted(e) {
         var _a2, _b2;
         const detail = e.detail;
-        if (String(detail == null ? void 0 : detail.node) !== String(self2.id)) return;
+        const nodeId = String((detail == null ? void 0 : detail.node) ?? "");
+        const selfId = String(self2.id);
+        if (nodeId !== selfId && !nodeId.endsWith(`:${selfId}`)) return;
         const refVals = (_a2 = detail == null ? void 0 : detail.output) == null ? void 0 : _a2["reference_sigmas"];
         if (Array.isArray(refVals) && refVals.length > 0) {
           (_b2 = instance.setReferenceSigmas) == null ? void 0 : _b2.call(instance, refVals.flat().map(Number));

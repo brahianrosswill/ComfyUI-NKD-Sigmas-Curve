@@ -86,7 +86,10 @@ comfyApp.registerExtension({
           output?: Record<string, unknown>;
           node?: string | number;
         };
-        if (String(detail?.node) !== String(self.id)) return;
+        // In subgraphs the node id is compound e.g. "916:915" — match the tail.
+        const nodeId = String(detail?.node ?? "");
+        const selfId = String(self.id);
+        if (nodeId !== selfId && !nodeId.endsWith(`:${selfId}`)) return;
 
         const refVals = detail?.output?.["reference_sigmas"];
         if (Array.isArray(refVals) && refVals.length > 0) {
