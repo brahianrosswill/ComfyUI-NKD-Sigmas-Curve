@@ -46,10 +46,23 @@ comfyApp.registerExtension({
       const stepsProxy    = reactive({ value: stepsWidget?.value    ?? 20 });
       const maxSigmaProxy = reactive({ value: maxSigmaWidget?.value ?? 1  });
 
+      // Hide curve_data from the UI entirely. socketless=True in the Python
+      // schema is not honored by the V3 frontend: it both renders the widget
+      // and creates a phantom input socket that lines up next to "steps",
+      // tricking users into connecting STRING wires there. The widget must
+      // stay in this.widgets so its value is included in the serialised
+      // workflow (the backend needs curve_data on execute), but we set
+      // every flag the renderer/layouter respects so nothing is drawn and
+      // no vertical space is reserved.
       if (curveDataWidget) {
         curveDataWidget.type           = "hidden";
+        curveDataWidget.hidden         = true;
         curveDataWidget.computedHeight = 0;
         curveDataWidget.computeSize    = () => [0, -4];
+      }
+      const cdIdx = this.inputs?.findIndex((inp: any) => inp.name === "curve_data");
+      if (cdIdx !== undefined && cdIdx >= 0) {
+        this.removeInput(cdIdx);
       }
 
       // ── Build container div for the Vue app ──────────────────────────

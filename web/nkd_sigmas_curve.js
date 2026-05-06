@@ -7280,7 +7280,7 @@ app.registerExtension({
     if (nodeData.name !== NODE_NAME) return;
     const origCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function() {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       const result = origCreated == null ? void 0 : origCreated.apply(this, arguments);
       const curveDataWidget = (_a = this.widgets) == null ? void 0 : _a.find(
         (w) => w.name === "curve_data"
@@ -7291,8 +7291,13 @@ app.registerExtension({
       const maxSigmaProxy = /* @__PURE__ */ reactive({ value: (maxSigmaWidget == null ? void 0 : maxSigmaWidget.value) ?? 1 });
       if (curveDataWidget) {
         curveDataWidget.type = "hidden";
+        curveDataWidget.hidden = true;
         curveDataWidget.computedHeight = 0;
         curveDataWidget.computeSize = () => [0, -4];
+      }
+      const cdIdx = (_d = this.inputs) == null ? void 0 : _d.findIndex((inp) => inp.name === "curve_data");
+      if (cdIdx !== void 0 && cdIdx >= 0) {
+        this.removeInput(cdIdx);
       }
       const container = document.createElement("div");
       container.style.cssText = "width:100%;box-sizing:border-box;overflow:hidden;border-top:1px solid rgba(255,255,255,0.06);";
