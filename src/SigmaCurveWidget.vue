@@ -67,6 +67,13 @@
           :title="!referenceSigmas ? 'Run the node to load reference' : 'Match curve to reference shape'"
           @click="initFromReference"
         >Match</button>
+        <button
+          class="nkd-btn nkd-btn--ref"
+          :class="{ 'nkd-btn--disabled': points.length <= 2 }"
+          :disabled="points.length <= 2"
+          title="Halve the number of control points (keeps endpoints)"
+          @click="reducePoints"
+        >Reduce</button>
       </div>
 
       <!-- Row 3: hint + live info -->
@@ -495,9 +502,17 @@ function drawReferenceCurve(): void {
   const refs = referenceSigmas.value;
   if (!refs || refs.length < 2) return;
 
-  // Normalise to [0, 1] relative to the reference's own max
-  const refMax = Math.max(...refs);
-  if (refMax === 0) return;
+  // Normalise against the user's max_sigma so the reference sits in the
+  // same vertical scale as the user's curve. The reference is drawn at
+  // its native sample positions (i / (refN - 1)) rather than resampled
+  // onto the user's step grid — the user may have a different step
+  // count than the upstream scheduler, and resampling would smooth over
+  // the scheduler's actual discrete points and create a visible
+  // mismatch with where the dots truly are.
+  const ms = extMaxSigma.value;
+  if (ms <= 0) return;
+
+  const n = refs.length;
 
   ctx!.save();
   ctx!.strokeStyle = "rgba(255,180,60,0.55)";
@@ -506,15 +521,26 @@ function drawReferenceCurve(): void {
   ctx!.lineJoin    = "round";
   ctx!.lineCap     = "round";
   ctx!.beginPath();
-  const n = refs.length;
   for (let i = 0; i < n; i++) {
     const t  = i / (n - 1);
-    const ny = Math.max(0, Math.min(1, refs[i] / refMax));
+    const ny = Math.max(0, Math.min(1, refs[i] / ms));
     const cx = toCanvasX(t);
     const cy = toCanvasY(ny);
     i === 0 ? ctx!.moveTo(cx, cy) : ctx!.lineTo(cx, cy);
   }
   ctx!.stroke();
+
+  // Draw a small dot at each reference sample so it's clear where the
+  // scheduler's discrete sigma points lie — useful when refN ≠ steps+1.
+  ctx!.setLineDash([]);
+  ctx!.fillStyle = "rgba(255,180,60,0.85)";
+  for (let i = 0; i < n; i++) {
+    const t  = i / (n - 1);
+    const ny = Math.max(0, Math.min(1, refs[i] / ms));
+    ctx!.beginPath();
+    ctx!.arc(toCanvasX(t), toCanvasY(ny), 2, 0, Math.PI * 2);
+    ctx!.fill();
+  }
   ctx!.restore();
 }
 
@@ -845,18 +871,38 @@ function initFromReference(): void {
   const refs = referenceSigmas.value;
   if (!refs || refs.length < 2) return;
 
-  const refMax = Math.max(...refs);
-  if (refMax === 0) return;
+  // Match against the user's max_sigma — same normalisation as the
+  // reference overlay, so the matched control points sit exactly on the
+  // dashed reference line.
+  const ms = extMaxSigma.value;
+  if (ms <= 0) return;
 
-  // Sample at 5 evenly-spaced positions from the reference
-  const positions = [0, 1/6, 2/6, 3/6, 4/6, 5/6, 1.0];
-  const newPts: Point[] = positions.map(t => {
-    const idx = Math.round(t * (refs.length - 1));
-    const ny  = Math.max(0, Math.min(1, refs[idx] / refMax));
-    return [t, ny, tension.value] as Point;
-  });
+  // Place one control point at every reference sample so the curve can
+  // exactly reproduce the scheduler's shape. Using a fixed sample count
+  // would blur the result whenever refs.length != that count.
+  const n = refs.length;
+  const newPts: Point[] = [];
+  for (let i = 0; i < n; i++) {
+    const t  = i / (n - 1);
+    const ny = Math.max(0, Math.min(1, refs[i] / ms));
+    newPts.push([t, ny, tension.value] as Point);
+  }
 
   points.value = newPts;
+  invalidateCache(); redraw(); emit();
+}
+
+/** Halve the number of control points, keeping the first and last. */
+function reducePoints(): void {
+  const pts = [...points.value].sort((a, b) => a[0] - b[0]);
+  if (pts.length <= 2) return;
+
+  // Keep every other point; always keep the first and last.
+  const kept: Point[] = [];
+  for (let i = 0; i < pts.length; i += 2) kept.push(pts[i]);
+  if (kept[kept.length - 1] !== pts[pts.length - 1]) kept.push(pts[pts.length - 1]);
+
+  points.value = kept;
   invalidateCache(); redraw(); emit();
 }
 

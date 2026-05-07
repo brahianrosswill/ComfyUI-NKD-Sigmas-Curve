@@ -6424,10 +6424,11 @@ const _hoisted_8 = {
 };
 const _hoisted_9 = ["disabled", "title"];
 const _hoisted_10 = ["disabled", "title"];
-const _hoisted_11 = { class: "nkd-row nkd-row--hint" };
-const _hoisted_12 = { class: "nkd-info" };
-const _hoisted_13 = { class: "nkd-hint" };
-const _hoisted_14 = { key: 0 };
+const _hoisted_11 = ["disabled"];
+const _hoisted_12 = { class: "nkd-row nkd-row--hint" };
+const _hoisted_13 = { class: "nkd-info" };
+const _hoisted_14 = { class: "nkd-hint" };
+const _hoisted_15 = { key: 0 };
 const CW = 400;
 const CH = 200;
 const MIN_RENDER_SCALE = 2;
@@ -6749,8 +6750,9 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     function drawReferenceCurve() {
       const refs = referenceSigmas.value;
       if (!refs || refs.length < 2) return;
-      const refMax = Math.max(...refs);
-      if (refMax === 0) return;
+      const ms = extMaxSigma.value;
+      if (ms <= 0) return;
+      const n = refs.length;
       ctx.save();
       ctx.strokeStyle = "rgba(255,180,60,0.55)";
       ctx.lineWidth = 1.5;
@@ -6758,15 +6760,23 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       ctx.beginPath();
-      const n = refs.length;
       for (let i = 0; i < n; i++) {
         const t = i / (n - 1);
-        const ny = Math.max(0, Math.min(1, refs[i] / refMax));
+        const ny = Math.max(0, Math.min(1, refs[i] / ms));
         const cx = toCanvasX(t);
         const cy = toCanvasY(ny);
         i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy);
       }
       ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(255,180,60,0.85)";
+      for (let i = 0; i < n; i++) {
+        const t = i / (n - 1);
+        const ny = Math.max(0, Math.min(1, refs[i] / ms));
+        ctx.beginPath();
+        ctx.arc(toCanvasX(t), toCanvasY(ny), 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
     function drawPointTooltip() {
@@ -7054,15 +7064,27 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     function initFromReference() {
       const refs = referenceSigmas.value;
       if (!refs || refs.length < 2) return;
-      const refMax = Math.max(...refs);
-      if (refMax === 0) return;
-      const positions = [0, 1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1];
-      const newPts = positions.map((t) => {
-        const idx = Math.round(t * (refs.length - 1));
-        const ny = Math.max(0, Math.min(1, refs[idx] / refMax));
-        return [t, ny, tension.value];
-      });
+      const ms = extMaxSigma.value;
+      if (ms <= 0) return;
+      const n = refs.length;
+      const newPts = [];
+      for (let i = 0; i < n; i++) {
+        const t = i / (n - 1);
+        const ny = Math.max(0, Math.min(1, refs[i] / ms));
+        newPts.push([t, ny, tension.value]);
+      }
       points.value = newPts;
+      invalidateCache();
+      redraw();
+      emit2();
+    }
+    function reducePoints() {
+      const pts = [...points.value].sort((a, b) => a[0] - b[0]);
+      if (pts.length <= 2) return;
+      const kept = [];
+      for (let i = 0; i < pts.length; i += 2) kept.push(pts[i]);
+      if (kept[kept.length - 1] !== pts[pts.length - 1]) kept.push(pts[pts.length - 1]);
+      points.value = kept;
       invalidateCache();
       redraw();
       emit2();
@@ -7240,14 +7262,20 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
               disabled: !referenceSigmas.value,
               title: !referenceSigmas.value ? "Run the node to load reference" : "Match curve to reference shape",
               onClick: initFromReference
-            }, "Match", 10, _hoisted_10)
+            }, "Match", 10, _hoisted_10),
+            createBaseVNode("button", {
+              class: normalizeClass(["nkd-btn nkd-btn--ref", { "nkd-btn--disabled": points.value.length <= 2 }]),
+              disabled: points.value.length <= 2,
+              title: "Halve the number of control points (keeps endpoints)",
+              onClick: reducePoints
+            }, "Reduce", 10, _hoisted_11)
           ])) : createCommentVNode("", true),
-          createBaseVNode("div", _hoisted_11, [
-            createBaseVNode("span", _hoisted_12, "S: " + toDisplayString(extSteps.value) + " | σmax: " + toDisplayString(fmtSigma(extMaxSigma.value)), 1),
+          createBaseVNode("div", _hoisted_12, [
+            createBaseVNode("span", _hoisted_13, "S: " + toDisplayString(extSteps.value) + " | σmax: " + toDisplayString(fmtSigma(extMaxSigma.value)), 1),
             _cache[10] || (_cache[10] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
-            createBaseVNode("span", _hoisted_13, [
+            createBaseVNode("span", _hoisted_14, [
               _cache[9] || (_cache[9] = createTextVNode(" Click=add · Drag=move · Shift+click=delete", -1)),
-              !endpointsLocked.value ? (openBlock(), createElementBlock("span", _hoisted_14, " · Endpoints unlocked")) : createCommentVNode("", true)
+              !endpointsLocked.value ? (openBlock(), createElementBlock("span", _hoisted_15, " · Endpoints unlocked")) : createCommentVNode("", true)
             ])
           ])
         ]),
@@ -7273,7 +7301,7 @@ const _export_sfc = (sfc, props) => {
   }
   return target;
 };
-const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-1e4bb03c"]]);
+const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-e97480ba"]]);
 const NODE_NAME = "NKDSigmasCurve";
 const EXT_NAME = "NKD.SigmasCurve.Vue";
 app.registerExtension({
@@ -7483,7 +7511,7 @@ app.registerExtension({
   try {
     if (typeof document != "undefined") {
       var elementStyle = document.createElement("style");
-      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-1e4bb03c] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-1e4bb03c] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-1e4bb03c] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-1e4bb03c] { padding: 5px 7px 3px;\n}\n.nkd-row--ref[data-v-1e4bb03c]      { padding: 2px 7px 3px; border-top: 1px solid rgba(255,180,60,0.12);\n}\n.nkd-row--hint[data-v-1e4bb03c]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-1e4bb03c] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-1e4bb03c] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-1e4bb03c]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-1e4bb03c] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-1e4bb03c] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-1e4bb03c] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-1e4bb03c] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-1e4bb03c] { flex: 1; min-width: 4px;\n}\r\n\r\n/* ── Unified button base ── */\n.nkd-btn[data-v-1e4bb03c] {\r\n  font-size: 11px;\r\n  font-family: sans-serif;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.5;\r\n  white-space: nowrap;\n}\n.nkd-btn[data-v-1e4bb03c]:hover:not(:disabled) {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn--active[data-v-1e4bb03c] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn[data-v-1e4bb03c]:disabled,\r\n.nkd-btn--disabled[data-v-1e4bb03c] {\r\n  opacity: 0.3;\r\n  cursor: not-allowed;\n}\r\n\r\n/* Reference-row buttons use amber accent instead of blue */\n.nkd-btn--ref[data-v-1e4bb03c]:hover:not(:disabled) {\r\n  border-color: #ffb43c;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn--ref-active[data-v-1e4bb03c] {\r\n  border-color: #ffb43c;\r\n  color: #ffb43c;\n}\n.nkd-info[data-v-1e4bb03c] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-1e4bb03c] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-1e4bb03c] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
+      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-e97480ba] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-e97480ba] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-e97480ba] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-e97480ba] { padding: 5px 7px 3px;\n}\n.nkd-row--ref[data-v-e97480ba]      { padding: 2px 7px 3px; border-top: 1px solid rgba(255,180,60,0.12);\n}\n.nkd-row--hint[data-v-e97480ba]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-e97480ba] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-e97480ba] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-e97480ba]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-e97480ba] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-e97480ba] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-e97480ba] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-e97480ba] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-e97480ba] { flex: 1; min-width: 4px;\n}\r\n\r\n/* ── Unified button base ── */\n.nkd-btn[data-v-e97480ba] {\r\n  font-size: 11px;\r\n  font-family: sans-serif;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.5;\r\n  white-space: nowrap;\n}\n.nkd-btn[data-v-e97480ba]:hover:not(:disabled) {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn--active[data-v-e97480ba] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn[data-v-e97480ba]:disabled,\r\n.nkd-btn--disabled[data-v-e97480ba] {\r\n  opacity: 0.3;\r\n  cursor: not-allowed;\n}\r\n\r\n/* Reference-row buttons use amber accent instead of blue */\n.nkd-btn--ref[data-v-e97480ba]:hover:not(:disabled) {\r\n  border-color: #ffb43c;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn--ref-active[data-v-e97480ba] {\r\n  border-color: #ffb43c;\r\n  color: #ffb43c;\n}\n.nkd-info[data-v-e97480ba] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-e97480ba] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-e97480ba] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
       document.head.appendChild(elementStyle);
     }
   } catch (e) {
