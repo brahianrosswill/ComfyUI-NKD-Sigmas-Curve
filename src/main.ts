@@ -134,6 +134,32 @@ comfyApp.registerExtension({
         instance.setReferenceConnected?.(connected);
       };
 
+      // ── Resolve the effective value of an input ──────────────────────
+      // When a widget has been converted to an input and a link is wired
+      // in, the local widget.value is stale — the real value lives on the
+      // upstream node. Walk the link to fetch it so the curve preview
+      // updates live as the user edits the upstream widget.
+      const resolveInputValue = (widgetName: string, fallback: any): any => {
+        const slotIdx = self.inputs?.findIndex((inp: any) => inp.name === widgetName);
+        const slot = slotIdx !== undefined && slotIdx >= 0 ? self.inputs[slotIdx] : null;
+        if (slot?.link != null) {
+          const linksMap: any = comfyApp.graph.links;
+          const link = linksMap instanceof Map ? linksMap.get(slot.link) : linksMap[slot.link];
+          if (link) {
+            const upstream = comfyApp.graph.getNodeById?.(link.origin_id)
+                          ?? (comfyApp.graph as any)._nodes_by_id?.[link.origin_id];
+            // PrimitiveNode and friends expose their value via widgets[0].
+            // Fall back to scanning outputs_values / properties when needed.
+            const w = upstream?.widgets?.find((ww: any) =>
+              ww?.name === "value" || ww?.name === widgetName
+            ) ?? upstream?.widgets?.[0];
+            if (w && w.value !== undefined && w.value !== null) return w.value;
+          }
+        }
+        const local = self.widgets?.find((w: any) => w.name === widgetName);
+        return local?.value ?? fallback;
+      };
+
       // ── Sync widget values into the reactive proxies ─────────────────
       // Primary path (v1 + v2): chain onto each widget's callback, which
       // LiteGraph calls synchronously when the user changes the value.
@@ -159,11 +185,12 @@ comfyApp.registerExtension({
       const origDrawBg = this.onDrawBackground;
       this.onDrawBackground = function (this: any, ctx: CanvasRenderingContext2D) {
         origDrawBg?.apply(this, arguments as any);
-        // Keep proxies in sync even if callback wasn't called (e.g. programmatic changes).
-        if (stepsWidget    && stepsProxy.value    !== stepsWidget.value)
-          stepsProxy.value    = stepsWidget.value;
-        if (maxSigmaWidget && maxSigmaProxy.value !== maxSigmaWidget.value)
-          maxSigmaProxy.value = maxSigmaWidget.value;
+        // Resolve effective values (upstream link wins over local widget) so
+        // the preview updates live when steps/max_sigma come from another node.
+        const effSteps    = resolveInputValue("steps", 20);
+        const effMaxSigma = resolveInputValue("max_sigma", 1.0);
+        if (stepsProxy.value    !== effSteps)    stepsProxy.value    = effSteps;
+        if (maxSigmaProxy.value !== effMaxSigma) maxSigmaProxy.value = effMaxSigma;
         // Once the canvas has real CSS dimensions, forceResize resolves the
         // blank-widget-on-first-load issue in v1 mode.
         if (v1NeedsInit && instance.forceResize?.()) v1NeedsInit = false;

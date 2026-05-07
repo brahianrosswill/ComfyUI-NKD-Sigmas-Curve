@@ -7342,6 +7342,24 @@ app.registerExtension({
         const connected = !!(refInput == null ? void 0 : refInput.link);
         (_b2 = instance.setReferenceConnected) == null ? void 0 : _b2.call(instance, connected);
       };
+      const resolveInputValue = (widgetName, fallback) => {
+        var _a2, _b2, _c2, _d2, _e, _f, _g;
+        const slotIdx = (_a2 = self2.inputs) == null ? void 0 : _a2.findIndex((inp) => inp.name === widgetName);
+        const slot = slotIdx !== void 0 && slotIdx >= 0 ? self2.inputs[slotIdx] : null;
+        if ((slot == null ? void 0 : slot.link) != null) {
+          const linksMap = app.graph.links;
+          const link = linksMap instanceof Map ? linksMap.get(slot.link) : linksMap[slot.link];
+          if (link) {
+            const upstream = ((_c2 = (_b2 = app.graph).getNodeById) == null ? void 0 : _c2.call(_b2, link.origin_id)) ?? ((_d2 = app.graph._nodes_by_id) == null ? void 0 : _d2[link.origin_id]);
+            const w = ((_e = upstream == null ? void 0 : upstream.widgets) == null ? void 0 : _e.find(
+              (ww) => (ww == null ? void 0 : ww.name) === "value" || (ww == null ? void 0 : ww.name) === widgetName
+            )) ?? ((_f = upstream == null ? void 0 : upstream.widgets) == null ? void 0 : _f[0]);
+            if (w && w.value !== void 0 && w.value !== null) return w.value;
+          }
+        }
+        const local = (_g = self2.widgets) == null ? void 0 : _g.find((w) => w.name === widgetName);
+        return (local == null ? void 0 : local.value) ?? fallback;
+      };
       if (stepsWidget) {
         const origCb = stepsWidget.callback;
         stepsWidget.callback = function(value) {
@@ -7361,10 +7379,10 @@ app.registerExtension({
       this.onDrawBackground = function(ctx) {
         var _a2;
         origDrawBg == null ? void 0 : origDrawBg.apply(this, arguments);
-        if (stepsWidget && stepsProxy.value !== stepsWidget.value)
-          stepsProxy.value = stepsWidget.value;
-        if (maxSigmaWidget && maxSigmaProxy.value !== maxSigmaWidget.value)
-          maxSigmaProxy.value = maxSigmaWidget.value;
+        const effSteps = resolveInputValue("steps", 20);
+        const effMaxSigma = resolveInputValue("max_sigma", 1);
+        if (stepsProxy.value !== effSteps) stepsProxy.value = effSteps;
+        if (maxSigmaProxy.value !== effMaxSigma) maxSigmaProxy.value = effMaxSigma;
         if (v1NeedsInit && ((_a2 = instance.forceResize) == null ? void 0 : _a2.call(instance))) v1NeedsInit = false;
       };
       const CANVAS_W = 400;
