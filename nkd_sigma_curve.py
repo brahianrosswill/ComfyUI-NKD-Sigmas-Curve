@@ -15,6 +15,8 @@ Interpolation modes:
 from __future__ import annotations
 
 import json
+import os
+import re
 import torch
 
 from comfy_api.latest import ComfyExtension, io
@@ -372,6 +374,136 @@ class NKDSigmaCurve(io.ComfyNode):
             ui_extra["reference_sigmas"] = reference_sigmas.tolist()
 
         return io.NodeOutput(sigmas, sigma_values, ui=ui_extra)
+
+
+# ─── Preset storage ─────────────────────────────────────────────────────────
+#
+# Curve presets are stored in the ComfyUI user directory so they survive
+# custom-node updates and can be shared across sessions. Only user-created
+# presets exist — for stock schedules (karras, simple, linear, …) users can
+# already pick those directly in the KSampler.
+
+_PRESET_NAME_RE = re.compile(r"^[\w \-().]{1,64}$")
+
+
+def _user_presets_path() -> str:
+    """Resolve the path to the user's preset JSON file in ComfyUI/user/."""
+    try:
+        import folder_paths  # type: ignore
+        user_dir = folder_paths.get_user_directory()
+    except Exception:
+        # Fallback: alongside the custom node (worst case, never read-only)
+        user_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)))
+    os.makedirs(user_dir, exist_ok=True)
+    return os.path.join(user_dir, "nkd_sigma_curve_presets.json")
+
+
+def _read_user_presets() -> list[dict]:
+    path = _user_presets_path()
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [p for p in data if isinstance(p, dict) and "name" in p]
+    except (OSError, json.JSONDecodeError):
+        pass
+    return []
+
+
+def _write_user_presets(presets: list[dict]) -> None:
+    path = _user_presets_path()
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(presets, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def _sanitise_preset(payload: dict) -> dict | None:
+    """Validate and normalise an incoming preset payload from the frontend."""
+    name = str(payload.get("name", "")).strip()
+    if not _PRESET_NAME_RE.match(name):
+        return None
+    raw_points = payload.get("points")
+    if not isinstance(raw_points, list) or len(raw_points) < 2:
+        return None
+    pts: list[list[float]] = []
+    for p in raw_points:
+        try:
+            x = max(0.0, min(1.0, float(p[0])))
+            y = max(0.0, min(1.0, float(p[1])))
+            w = max(1.0, min(10.0, float(p[2]))) if len(p) > 2 else 1.0
+            pts.append([x, y, w])
+        except (IndexError, TypeError, ValueError):
+            return None
+    interp = payload.get("interpolation", "smooth")
+    if interp not in ("smooth", "linear"):
+        interp = "smooth"
+    try:
+        tension = max(1.0, min(10.0, float(payload.get("tension", 1.0))))
+    except (TypeError, ValueError):
+        tension = 1.0
+    locked = bool(payload.get("endpointsLocked", True))
+    return {
+        "name": name,
+        "points": pts,
+        "interpolation": interp,
+        "tension": tension,
+        "endpointsLocked": locked,
+    }
+
+
+def _register_preset_routes() -> None:
+    """Register the /nkd_sigma_curve/presets endpoints with ComfyUI's server."""
+    try:
+        from server import PromptServer  # type: ignore
+        from aiohttp import web  # type: ignore
+    except ImportError:
+        return
+
+    routes = PromptServer.instance.routes
+
+    @routes.get("/nkd_sigma_curve/presets")
+    async def list_presets(_request):
+        return web.json_response({"user": _read_user_presets()})
+
+    @routes.post("/nkd_sigma_curve/presets")
+    async def save_preset(request):
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid json"}, status=400)
+        clean = _sanitise_preset(payload)
+        if clean is None:
+            return web.json_response({"error": "invalid preset"}, status=400)
+        presets = _read_user_presets()
+        # Replace if name exists (case-insensitive), else append
+        idx = next(
+            (i for i, p in enumerate(presets) if p.get("name", "").lower() == clean["name"].lower()),
+            -1,
+        )
+        if idx >= 0:
+            presets[idx] = clean
+        else:
+            presets.append(clean)
+        _write_user_presets(presets)
+        return web.json_response({"ok": True, "preset": clean})
+
+    @routes.delete("/nkd_sigma_curve/presets/{name}")
+    async def delete_preset(request):
+        name = request.match_info.get("name", "").strip()
+        if not name:
+            return web.json_response({"error": "missing name"}, status=400)
+        presets = _read_user_presets()
+        new_presets = [p for p in presets if p.get("name", "").lower() != name.lower()]
+        if len(new_presets) == len(presets):
+            return web.json_response({"error": "not found"}, status=404)
+        _write_user_presets(new_presets)
+        return web.json_response({"ok": True})
+
+
+_register_preset_routes()
 
 
 # ─── V3 Extension entrypoint ──────────────────────────────────────────────────

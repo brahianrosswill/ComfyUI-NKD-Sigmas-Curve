@@ -50,7 +50,36 @@
 
       </div>
 
-      <!-- Row 2: reference controls (only when a reference input is connected) -->
+      <!-- Row 2: presets -->
+      <div class="nkd-row nkd-row--presets">
+        <span class="nkd-label">Preset</span>
+        <select
+          class="nkd-select nkd-select--preset"
+          :value="selectedPreset"
+          @change="onPresetSelect(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">— Select —</option>
+          <option
+            v-for="p in userPresets"
+            :key="p.name"
+            :value="p.name"
+          >{{ p.name }}</option>
+        </select>
+        <button
+          class="nkd-btn nkd-btn--preset"
+          title="Save current curve as a preset"
+          @click="saveCurrentAsPreset"
+        >Save</button>
+        <button
+          class="nkd-btn nkd-btn--preset"
+          :class="{ 'nkd-btn--disabled': !selectedPreset }"
+          :disabled="!selectedPreset"
+          title="Delete the selected preset"
+          @click="deleteSelectedPreset"
+        >Delete</button>
+      </div>
+
+      <!-- Row 3: reference controls (only when a reference input is connected) -->
       <div v-if="referenceConnected" class="nkd-row nkd-row--ref">
         <span class="nkd-label">Ref</span>
         <button
@@ -187,6 +216,17 @@ const snapToSteps     = ref(false);                 // snap X to step positions
 const referenceConnected = ref(false);           // true as soon as a link is wired
 const referenceSigmas    = ref<number[] | null>(null);
 const showReference      = ref(false);
+
+// Presets — fetched from /nkd_sigma_curve/presets on mount
+type Preset = {
+  name: string;
+  points: Point[];
+  interpolation: "smooth" | "linear";
+  tension: number;
+  endpointsLocked: boolean;
+};
+const userPresets    = ref<Preset[]>([]);
+const selectedPreset = ref<string>("");           // "" or preset name
 
 // External widget values (live-read each draw)
 const extSteps    = computed(() => +(props.stepsWidget?.value    ?? 20));
@@ -906,6 +946,98 @@ function reducePoints(): void {
   invalidateCache(); redraw(); emit();
 }
 
+// ── Presets ───────────────────────────────────────────────────────────────────
+
+async function loadPresets(): Promise<void> {
+  try {
+    const res = await fetch("/nkd_sigma_curve/presets");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data.user)) userPresets.value = data.user;
+  } catch {
+    // Endpoint not available — leave the dropdown empty.
+  }
+}
+
+function applyPreset(p: Preset): void {
+  if (!Array.isArray(p.points) || p.points.length < 2) return;
+  endpointsLocked.value = !!p.endpointsLocked;
+  interpolation.value   = p.interpolation === "linear" ? "linear" : "smooth";
+  tension.value         = Math.max(1, Math.min(10, +p.tension || 1));
+  points.value = p.points.map(pt => {
+    const x = Math.max(0, Math.min(1, +pt[0]));
+    const y = Math.max(0, Math.min(1, +pt[1]));
+    const w = Math.max(1, Math.min(10, pt[2] !== undefined ? +pt[2] : 1));
+    return [x, y, w] as Point;
+  });
+  points.value.sort((a, b) => a[0] - b[0]);
+  invalidateCache(); redraw(); emit();
+}
+
+function onPresetSelect(value: string): void {
+  selectedPreset.value = value;
+  if (!value) return;
+  const p = userPresets.value.find(x => x.name === value);
+  if (p) applyPreset(p);
+}
+
+async function saveCurrentAsPreset(): Promise<void> {
+  const raw = window.prompt("Preset name (1–64 chars: letters, numbers, spaces, -_().):");
+  if (raw === null) return;
+  const name = raw.trim();
+  if (!name) return;
+  if (!/^[\w \-().]{1,64}$/.test(name)) {
+    window.alert("Invalid name. Use letters, numbers, spaces, or - _ ( ) .");
+    return;
+  }
+  const exists = userPresets.value.some(p => p.name.toLowerCase() === name.toLowerCase());
+  if (exists && !window.confirm(`Overwrite existing preset "${name}"?`)) return;
+
+  const payload = {
+    name,
+    points:          points.value,
+    interpolation:   interpolation.value,
+    tension:         tension.value,
+    endpointsLocked: endpointsLocked.value,
+  };
+  try {
+    const res = await fetch("/nkd_sigma_curve/presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      window.alert(`Save failed: ${err.error ?? res.statusText}`);
+      return;
+    }
+    await loadPresets();
+    selectedPreset.value = name;
+  } catch (e) {
+    window.alert(`Save failed: ${e}`);
+  }
+}
+
+async function deleteSelectedPreset(): Promise<void> {
+  const name = selectedPreset.value;
+  if (!name) return;
+  if (!window.confirm(`Delete preset "${name}"?`)) return;
+  try {
+    const res = await fetch(`/nkd_sigma_curve/presets/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      window.alert(`Delete failed: ${err.error ?? res.statusText}`);
+      return;
+    }
+    await loadPresets();
+    selectedPreset.value = "";
+  } catch (e) {
+    window.alert(`Delete failed: ${e}`);
+  }
+}
+
 /** Called from main.ts when the reference link is connected/disconnected or data arrives. */
 function setReferenceSigmas(values: number[] | null): void {
   referenceSigmas.value = values;
@@ -1042,6 +1174,9 @@ onMounted(() => {
   api.addEventListener("execution_success",     clearProgress);
   api.addEventListener("execution_error",       clearProgress);
   api.addEventListener("execution_interrupted", clearProgress);
+
+  // Fetch presets in the background; the dropdown stays empty until they arrive.
+  loadPresets();
 });
 </script>
 
@@ -1075,8 +1210,12 @@ onMounted(() => {
 }
 
 .nkd-row--controls { padding: 5px 7px 3px; }
+.nkd-row--presets  { padding: 2px 7px 3px; border-top: 1px solid rgba(255,255,255,0.06); }
 .nkd-row--ref      { padding: 2px 7px 3px; border-top: 1px solid rgba(255,180,60,0.12); }
 .nkd-row--hint     { padding: 2px 7px 4px; }
+
+.nkd-select--preset { flex: 1 1 auto; min-width: 0; max-width: 240px; }
+.nkd-btn--preset    { padding: 2px 8px; }
 
 .nkd-label {
   font-size: 11px;

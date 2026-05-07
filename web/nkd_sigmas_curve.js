@@ -2521,6 +2521,52 @@ function onErrorCaptured(hook, target = currentInstance) {
   injectHook("ec", hook, target);
 }
 const NULL_DYNAMIC_COMPONENT = /* @__PURE__ */ Symbol.for("v-ndc");
+function renderList(source, renderItem, cache, index) {
+  let ret;
+  const cached = cache;
+  const sourceIsArray = isArray(source);
+  if (sourceIsArray || isString(source)) {
+    const sourceIsReactiveArray = sourceIsArray && /* @__PURE__ */ isReactive(source);
+    let needsWrap = false;
+    let isReadonlySource = false;
+    if (sourceIsReactiveArray) {
+      needsWrap = !/* @__PURE__ */ isShallow(source);
+      isReadonlySource = /* @__PURE__ */ isReadonly(source);
+      source = shallowReadArray(source);
+    }
+    ret = new Array(source.length);
+    for (let i = 0, l = source.length; i < l; i++) {
+      ret[i] = renderItem(
+        needsWrap ? isReadonlySource ? toReadonly(toReactive(source[i])) : toReactive(source[i]) : source[i],
+        i,
+        void 0,
+        cached
+      );
+    }
+  } else if (typeof source === "number") {
+    ret = new Array(source);
+    for (let i = 0; i < source; i++) {
+      ret[i] = renderItem(i + 1, i, void 0, cached);
+    }
+  } else if (isObject(source)) {
+    if (source[Symbol.iterator]) {
+      ret = Array.from(
+        source,
+        (item, i) => renderItem(item, i, void 0, cached)
+      );
+    } else {
+      const keys = Object.keys(source);
+      ret = new Array(keys.length);
+      for (let i = 0, l = keys.length; i < l; i++) {
+        const key = keys[i];
+        ret[i] = renderItem(source[key], key, i, cached);
+      }
+    }
+  } else {
+    ret = [];
+  }
+  return ret;
+}
 const getPublicInstance = (i) => {
   if (!i) return null;
   if (isStatefulComponent(i)) return getComponentPublicInstance(i);
@@ -6418,17 +6464,21 @@ const _hoisted_4 = { class: "nkd-group" };
 const _hoisted_5 = { class: "nkd-mono" };
 const _hoisted_6 = ["title"];
 const _hoisted_7 = ["disabled", "title"];
-const _hoisted_8 = {
+const _hoisted_8 = { class: "nkd-row nkd-row--presets" };
+const _hoisted_9 = ["value"];
+const _hoisted_10 = ["value"];
+const _hoisted_11 = ["disabled"];
+const _hoisted_12 = {
   key: 0,
   class: "nkd-row nkd-row--ref"
 };
-const _hoisted_9 = ["disabled", "title"];
-const _hoisted_10 = ["disabled", "title"];
-const _hoisted_11 = ["disabled"];
-const _hoisted_12 = { class: "nkd-row nkd-row--hint" };
-const _hoisted_13 = { class: "nkd-info" };
-const _hoisted_14 = { class: "nkd-hint" };
-const _hoisted_15 = { key: 0 };
+const _hoisted_13 = ["disabled", "title"];
+const _hoisted_14 = ["disabled", "title"];
+const _hoisted_15 = ["disabled"];
+const _hoisted_16 = { class: "nkd-row nkd-row--hint" };
+const _hoisted_17 = { class: "nkd-info" };
+const _hoisted_18 = { class: "nkd-hint" };
+const _hoisted_19 = { key: 0 };
 const CW = 400;
 const CH = 200;
 const MIN_RENDER_SCALE = 2;
@@ -6479,6 +6529,8 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
     const referenceConnected = /* @__PURE__ */ ref(false);
     const referenceSigmas = /* @__PURE__ */ ref(null);
     const showReference = /* @__PURE__ */ ref(false);
+    const userPresets = /* @__PURE__ */ ref([]);
+    const selectedPreset = /* @__PURE__ */ ref("");
     const extSteps = computed(() => {
       var _a;
       return +(((_a = props.stepsWidget) == null ? void 0 : _a.value) ?? 20);
@@ -7089,6 +7141,91 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       redraw();
       emit2();
     }
+    async function loadPresets() {
+      try {
+        const res = await fetch("/nkd_sigma_curve/presets");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.user)) userPresets.value = data.user;
+      } catch {
+      }
+    }
+    function applyPreset(p2) {
+      if (!Array.isArray(p2.points) || p2.points.length < 2) return;
+      endpointsLocked.value = !!p2.endpointsLocked;
+      interpolation.value = p2.interpolation === "linear" ? "linear" : "smooth";
+      tension.value = Math.max(1, Math.min(10, +p2.tension || 1));
+      points.value = p2.points.map((pt) => {
+        const x = Math.max(0, Math.min(1, +pt[0]));
+        const y = Math.max(0, Math.min(1, +pt[1]));
+        const w = Math.max(1, Math.min(10, pt[2] !== void 0 ? +pt[2] : 1));
+        return [x, y, w];
+      });
+      points.value.sort((a, b) => a[0] - b[0]);
+      invalidateCache();
+      redraw();
+      emit2();
+    }
+    function onPresetSelect(value) {
+      selectedPreset.value = value;
+      if (!value) return;
+      const p2 = userPresets.value.find((x) => x.name === value);
+      if (p2) applyPreset(p2);
+    }
+    async function saveCurrentAsPreset() {
+      const raw = window.prompt("Preset name (1–64 chars: letters, numbers, spaces, -_().):");
+      if (raw === null) return;
+      const name = raw.trim();
+      if (!name) return;
+      if (!/^[\w \-().]{1,64}$/.test(name)) {
+        window.alert("Invalid name. Use letters, numbers, spaces, or - _ ( ) .");
+        return;
+      }
+      const exists = userPresets.value.some((p2) => p2.name.toLowerCase() === name.toLowerCase());
+      if (exists && !window.confirm(`Overwrite existing preset "${name}"?`)) return;
+      const payload = {
+        name,
+        points: points.value,
+        interpolation: interpolation.value,
+        tension: tension.value,
+        endpointsLocked: endpointsLocked.value
+      };
+      try {
+        const res = await fetch("/nkd_sigma_curve/presets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          window.alert(`Save failed: ${err.error ?? res.statusText}`);
+          return;
+        }
+        await loadPresets();
+        selectedPreset.value = name;
+      } catch (e) {
+        window.alert(`Save failed: ${e}`);
+      }
+    }
+    async function deleteSelectedPreset() {
+      const name = selectedPreset.value;
+      if (!name) return;
+      if (!window.confirm(`Delete preset "${name}"?`)) return;
+      try {
+        const res = await fetch(`/nkd_sigma_curve/presets/${encodeURIComponent(name)}`, {
+          method: "DELETE"
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          window.alert(`Delete failed: ${err.error ?? res.statusText}`);
+          return;
+        }
+        await loadPresets();
+        selectedPreset.value = "";
+      } catch (e) {
+        window.alert(`Delete failed: ${e}`);
+      }
+    }
     function setReferenceSigmas(values) {
       referenceSigmas.value = values;
       showReference.value = values !== null;
@@ -7192,25 +7329,26 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
       api.addEventListener("execution_success", clearProgress);
       api.addEventListener("execution_error", clearProgress);
       api.addEventListener("execution_interrupted", clearProgress);
+      loadPresets();
     });
     return (_ctx, _cache) => {
       return openBlock(), createElementBlock("div", _hoisted_1, [
         createBaseVNode("div", _hoisted_2, [
           createBaseVNode("div", _hoisted_3, [
-            _cache[5] || (_cache[5] = createBaseVNode("span", { class: "nkd-label" }, "Mode", -1)),
+            _cache[6] || (_cache[6] = createBaseVNode("span", { class: "nkd-label" }, "Mode", -1)),
             withDirectives(createBaseVNode("select", {
               "onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => interpolation.value = $event),
               class: "nkd-select",
               onChange: onInterpChange
-            }, [..._cache[3] || (_cache[3] = [
+            }, [..._cache[4] || (_cache[4] = [
               createBaseVNode("option", { value: "smooth" }, "Smooth", -1),
               createBaseVNode("option", { value: "linear" }, "Linear", -1)
             ])], 544), [
               [vModelSelect, interpolation.value]
             ]),
-            _cache[6] || (_cache[6] = createBaseVNode("div", { class: "nkd-divider" }, null, -1)),
+            _cache[7] || (_cache[7] = createBaseVNode("div", { class: "nkd-divider" }, null, -1)),
             withDirectives(createBaseVNode("div", _hoisted_4, [
-              _cache[4] || (_cache[4] = createBaseVNode("span", { class: "nkd-label" }, "Weight", -1)),
+              _cache[5] || (_cache[5] = createBaseVNode("span", { class: "nkd-label" }, "Weight", -1)),
               withDirectives(createBaseVNode("input", {
                 "onUpdate:modelValue": _cache[1] || (_cache[1] = ($event) => tension.value = $event),
                 type: "range",
@@ -7231,7 +7369,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
             ], 512), [
               [vShow, interpolation.value === "smooth"]
             ]),
-            _cache[7] || (_cache[7] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
+            _cache[8] || (_cache[8] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
             createBaseVNode("button", {
               class: normalizeClass(["nkd-btn", { "nkd-btn--active": !endpointsLocked.value }]),
               title: endpointsLocked.value ? "Unlock endpoints" : "Lock endpoints",
@@ -7249,33 +7387,60 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
               onClick: resetCurve
             }, "↺")
           ]),
-          referenceConnected.value ? (openBlock(), createElementBlock("div", _hoisted_8, [
-            _cache[8] || (_cache[8] = createBaseVNode("span", { class: "nkd-label" }, "Ref", -1)),
+          createBaseVNode("div", _hoisted_8, [
+            _cache[10] || (_cache[10] = createBaseVNode("span", { class: "nkd-label" }, "Preset", -1)),
+            createBaseVNode("select", {
+              class: "nkd-select nkd-select--preset",
+              value: selectedPreset.value,
+              onChange: _cache[2] || (_cache[2] = ($event) => onPresetSelect($event.target.value))
+            }, [
+              _cache[9] || (_cache[9] = createBaseVNode("option", { value: "" }, "— Select —", -1)),
+              (openBlock(true), createElementBlock(Fragment, null, renderList(userPresets.value, (p2) => {
+                return openBlock(), createElementBlock("option", {
+                  key: p2.name,
+                  value: p2.name
+                }, toDisplayString(p2.name), 9, _hoisted_10);
+              }), 128))
+            ], 40, _hoisted_9),
+            createBaseVNode("button", {
+              class: "nkd-btn nkd-btn--preset",
+              title: "Save current curve as a preset",
+              onClick: saveCurrentAsPreset
+            }, "Save"),
+            createBaseVNode("button", {
+              class: normalizeClass(["nkd-btn nkd-btn--preset", { "nkd-btn--disabled": !selectedPreset.value }]),
+              disabled: !selectedPreset.value,
+              title: "Delete the selected preset",
+              onClick: deleteSelectedPreset
+            }, "Delete", 10, _hoisted_11)
+          ]),
+          referenceConnected.value ? (openBlock(), createElementBlock("div", _hoisted_12, [
+            _cache[11] || (_cache[11] = createBaseVNode("span", { class: "nkd-label" }, "Ref", -1)),
             createBaseVNode("button", {
               class: normalizeClass(["nkd-btn nkd-btn--ref", { "nkd-btn--active nkd-btn--ref-active": showReference.value, "nkd-btn--disabled": !referenceSigmas.value }]),
               disabled: !referenceSigmas.value,
               title: !referenceSigmas.value ? "Run the node to load reference" : showReference.value ? "Hide reference overlay" : "Show reference overlay",
               onClick: toggleReference
-            }, toDisplayString(showReference.value ? "Hide" : "Show"), 11, _hoisted_9),
+            }, toDisplayString(showReference.value ? "Hide" : "Show"), 11, _hoisted_13),
             createBaseVNode("button", {
               class: normalizeClass(["nkd-btn nkd-btn--ref", { "nkd-btn--disabled": !referenceSigmas.value }]),
               disabled: !referenceSigmas.value,
               title: !referenceSigmas.value ? "Run the node to load reference" : "Match curve to reference shape",
               onClick: initFromReference
-            }, "Match", 10, _hoisted_10),
+            }, "Match", 10, _hoisted_14),
             createBaseVNode("button", {
               class: normalizeClass(["nkd-btn nkd-btn--ref", { "nkd-btn--disabled": points.value.length <= 2 }]),
               disabled: points.value.length <= 2,
               title: "Halve the number of control points (keeps endpoints)",
               onClick: reducePoints
-            }, "Reduce", 10, _hoisted_11)
+            }, "Reduce", 10, _hoisted_15)
           ])) : createCommentVNode("", true),
-          createBaseVNode("div", _hoisted_12, [
-            createBaseVNode("span", _hoisted_13, "S: " + toDisplayString(extSteps.value) + " | σmax: " + toDisplayString(fmtSigma(extMaxSigma.value)), 1),
-            _cache[10] || (_cache[10] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
-            createBaseVNode("span", _hoisted_14, [
-              _cache[9] || (_cache[9] = createTextVNode(" Click=add · Drag=move · Shift+click=delete", -1)),
-              !endpointsLocked.value ? (openBlock(), createElementBlock("span", _hoisted_15, " · Endpoints unlocked")) : createCommentVNode("", true)
+          createBaseVNode("div", _hoisted_16, [
+            createBaseVNode("span", _hoisted_17, "S: " + toDisplayString(extSteps.value) + " | σmax: " + toDisplayString(fmtSigma(extMaxSigma.value)), 1),
+            _cache[13] || (_cache[13] = createBaseVNode("div", { class: "nkd-spacer" }, null, -1)),
+            createBaseVNode("span", _hoisted_18, [
+              _cache[12] || (_cache[12] = createTextVNode(" Click=add · Drag=move · Shift+click=delete", -1)),
+              !endpointsLocked.value ? (openBlock(), createElementBlock("span", _hoisted_19, " · Endpoints unlocked")) : createCommentVNode("", true)
             ])
           ])
         ]),
@@ -7287,7 +7452,7 @@ const _sfc_main = /* @__PURE__ */ defineComponent({
           onMousemove: withModifiers(onMove, ["stop"]),
           onMouseup: withModifiers(onUp, ["stop"]),
           onMouseleave: withModifiers(onLeave, ["stop"]),
-          onContextmenu: _cache[2] || (_cache[2] = withModifiers(() => {
+          onContextmenu: _cache[3] || (_cache[3] = withModifiers(() => {
           }, ["prevent"]))
         }, null, 544)
       ]);
@@ -7301,7 +7466,7 @@ const _export_sfc = (sfc, props) => {
   }
   return target;
 };
-const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-e97480ba"]]);
+const SigmaCurveWidget = /* @__PURE__ */ _export_sfc(_sfc_main, [["__scopeId", "data-v-0eada1f9"]]);
 const NODE_NAME = "NKDSigmasCurve";
 const EXT_NAME = "NKD.SigmasCurve.Vue";
 app.registerExtension({
@@ -7511,7 +7676,7 @@ app.registerExtension({
   try {
     if (typeof document != "undefined") {
       var elementStyle = document.createElement("style");
-      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-e97480ba] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-e97480ba] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-e97480ba] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-e97480ba] { padding: 5px 7px 3px;\n}\n.nkd-row--ref[data-v-e97480ba]      { padding: 2px 7px 3px; border-top: 1px solid rgba(255,180,60,0.12);\n}\n.nkd-row--hint[data-v-e97480ba]     { padding: 2px 7px 4px;\n}\n.nkd-label[data-v-e97480ba] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-e97480ba] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-e97480ba]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-e97480ba] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-e97480ba] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-e97480ba] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-e97480ba] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-e97480ba] { flex: 1; min-width: 4px;\n}\r\n\r\n/* ── Unified button base ── */\n.nkd-btn[data-v-e97480ba] {\r\n  font-size: 11px;\r\n  font-family: sans-serif;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.5;\r\n  white-space: nowrap;\n}\n.nkd-btn[data-v-e97480ba]:hover:not(:disabled) {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn--active[data-v-e97480ba] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn[data-v-e97480ba]:disabled,\r\n.nkd-btn--disabled[data-v-e97480ba] {\r\n  opacity: 0.3;\r\n  cursor: not-allowed;\n}\r\n\r\n/* Reference-row buttons use amber accent instead of blue */\n.nkd-btn--ref[data-v-e97480ba]:hover:not(:disabled) {\r\n  border-color: #ffb43c;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn--ref-active[data-v-e97480ba] {\r\n  border-color: #ffb43c;\r\n  color: #ffb43c;\n}\n.nkd-info[data-v-e97480ba] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-e97480ba] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-e97480ba] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
+      elementStyle.appendChild(document.createTextNode(".nkd-root[data-v-0eada1f9] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  height: 100%;\r\n  background: transparent;\r\n  overflow: hidden;\r\n  font-family: sans-serif;\r\n  font-size: 11px;\r\n  color: #c8d0e0;\r\n  user-select: none;\n}\r\n\r\n/* Controls bar */\n.nkd-bar[data-v-0eada1f9] {\r\n  display: flex;\r\n  flex-direction: column;\r\n  background: #1a1c22;\r\n  border-bottom: 1px solid #2a2d36;\n}\n.nkd-row[data-v-0eada1f9] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 6px;\r\n  flex-wrap: nowrap;\r\n  overflow: hidden;\n}\n.nkd-row--controls[data-v-0eada1f9] { padding: 5px 7px 3px;\n}\n.nkd-row--presets[data-v-0eada1f9]  { padding: 2px 7px 3px; border-top: 1px solid rgba(255,255,255,0.06);\n}\n.nkd-row--ref[data-v-0eada1f9]      { padding: 2px 7px 3px; border-top: 1px solid rgba(255,180,60,0.12);\n}\n.nkd-row--hint[data-v-0eada1f9]     { padding: 2px 7px 4px;\n}\n.nkd-select--preset[data-v-0eada1f9] { flex: 1 1 auto; min-width: 0; max-width: 240px;\n}\n.nkd-btn--preset[data-v-0eada1f9]    { padding: 2px 8px;\n}\n.nkd-label[data-v-0eada1f9] {\r\n  font-size: 11px;\r\n  color: rgba(255,255,255,0.45);\r\n  white-space: nowrap;\n}\n.nkd-select[data-v-0eada1f9] {\r\n  font-size: 11px;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: #c8d0e0;\r\n  border-radius: 4px;\r\n  padding: 2px 5px;\r\n  cursor: pointer;\r\n  outline: none;\n}\n.nkd-select[data-v-0eada1f9]:focus { border-color: #4ab4ff;\n}\n.nkd-divider[data-v-0eada1f9] {\r\n  width: 1px; height: 14px;\r\n  background: rgba(255,255,255,0.12);\r\n  margin: 0 1px;\n}\n.nkd-group[data-v-0eada1f9] {\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 5px;\n}\n.nkd-slider[data-v-0eada1f9] {\r\n  width: 72px;\r\n  height: 4px;\r\n  cursor: pointer;\r\n  accent-color: #4ab4ff;\n}\n.nkd-mono[data-v-0eada1f9] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: #aac;\r\n  min-width: 28px;\n}\n.nkd-spacer[data-v-0eada1f9] { flex: 1; min-width: 4px;\n}\r\n\r\n/* ── Unified button base ── */\n.nkd-btn[data-v-0eada1f9] {\r\n  font-size: 11px;\r\n  font-family: sans-serif;\r\n  background: #252830;\r\n  border: 1px solid #3a3d46;\r\n  color: rgba(255,255,255,0.55);\r\n  border-radius: 4px;\r\n  padding: 1px 7px;\r\n  cursor: pointer;\r\n  line-height: 1.5;\r\n  white-space: nowrap;\n}\n.nkd-btn[data-v-0eada1f9]:hover:not(:disabled) {\r\n  border-color: #4ab4ff;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn--active[data-v-0eada1f9] {\r\n  border-color: #4ab4ff;\r\n  color: #4ab4ff;\n}\n.nkd-btn[data-v-0eada1f9]:disabled,\r\n.nkd-btn--disabled[data-v-0eada1f9] {\r\n  opacity: 0.3;\r\n  cursor: not-allowed;\n}\r\n\r\n/* Reference-row buttons use amber accent instead of blue */\n.nkd-btn--ref[data-v-0eada1f9]:hover:not(:disabled) {\r\n  border-color: #ffb43c;\r\n  color: rgba(255,255,255,0.85);\n}\n.nkd-btn--ref-active[data-v-0eada1f9] {\r\n  border-color: #ffb43c;\r\n  color: #ffb43c;\n}\n.nkd-info[data-v-0eada1f9] {\r\n  font-size: 10px;\r\n  font-family: monospace;\r\n  color: rgba(180,210,255,0.65);\r\n  white-space: nowrap;\n}\n.nkd-hint[data-v-0eada1f9] {\r\n  font-size: 9.5px;\r\n  color: rgba(255,255,255,0.22);\n}\r\n\r\n/* Canvas */\n.nkd-canvas[data-v-0eada1f9] {\r\n  display: block;\r\n  width: 100%;\r\n  height: auto;\r\n  cursor: crosshair;\r\n  background: #111318;\n}"));
       document.head.appendChild(elementStyle);
     }
   } catch (e) {
