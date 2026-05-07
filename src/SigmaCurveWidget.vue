@@ -612,7 +612,11 @@ function drawGrid(): void {
   ctx!.lineWidth   = 0.75;
   ctx!.setLineDash([2.5, 5]);
   for (let i = 1; i < 4; i++) {
-    ctx!.beginPath(); ctx!.moveTo(PAD.left + (i/4)*IW, PAD.top); ctx!.lineTo(PAD.left + (i/4)*IW, PAD.top+IH); ctx!.stroke();
+    // Skip the default vertical quarter-lines when snap is active — the
+    // snap grid replaces them and the overlap is visually noisy.
+    if (!snapEnabled.value) {
+      ctx!.beginPath(); ctx!.moveTo(PAD.left + (i/4)*IW, PAD.top); ctx!.lineTo(PAD.left + (i/4)*IW, PAD.top+IH); ctx!.stroke();
+    }
     ctx!.beginPath(); ctx!.moveTo(PAD.left, PAD.top + (i/4)*IH); ctx!.lineTo(PAD.left+IW, PAD.top + (i/4)*IH); ctx!.stroke();
   }
   ctx!.setLineDash([]);
