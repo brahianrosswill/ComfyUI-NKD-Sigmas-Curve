@@ -1,10 +1,6 @@
 
 # ComfyUI NKD Sigmas Curve
 
->⚠️ **This is my first custom node, and I built the whole thing just vibecoding with Claude. To be honest, I have no clue what I'm doing. I'm just a monkey with a shotgun telling a robot to build what I want. Expect some bugs... or not. Who knows? It's a miracle this thing even works.**
-
----
-
 A ComfyUI custom node that replaces trial-and-error sigma tuning with a visual, interactive spline editor. Design your diffusion noise schedule exactly the way you want it, then plug it straight into any sampler.
 
 ## Why this exists
