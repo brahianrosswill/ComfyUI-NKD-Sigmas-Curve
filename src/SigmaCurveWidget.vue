@@ -19,6 +19,7 @@
           <span class="nkd-label">Weight</span>
           <input
             v-model.number="tension"
+            :style="rangeStyle(tension, 1, 10)"
             type="range" min="1" max="10" step="0.1"
             class="nkd-slider"
             @input="onTensionInput"
@@ -195,6 +196,12 @@ const props = defineProps<{
 }>();
 
 // ── State ─────────────────────────────────────────────────────────────────────
+
+// Fill percentage for ComfyUI-style sliders (drives the --nkd-fill CSS var)
+function rangeStyle(v: number, min: number, max: number) {
+  const pct = Math.max(0, Math.min(100, ((v - min) / (max - min)) * 100));
+  return { "--nkd-fill": pct + "%" };
+}
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 let   ctx:            CanvasRenderingContext2D | null = null;
@@ -1181,24 +1188,32 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ── Root — shared visual language with Relight / Lens Blur ─────────────── */
 .nkd-root {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: transparent;
+  background: var(--comfy-menu-bg, #111318);
   overflow: hidden;
-  font-family: sans-serif;
+  border-radius: 8px;
+  font-family: var(--font-family, "Inter", sans-serif);
   font-size: 11px;
-  color: #c8d0e0;
+  color: var(--fg-color, #c8d0e0);
   user-select: none;
 }
+/* Universal border-box inside the widget — prevents fixed-width children
+   from overflowing the node and "bleeding" past its border. */
+.nkd-root, .nkd-root *, .nkd-root *::before, .nkd-root *::after {
+  box-sizing: border-box;
+}
 
-/* Controls bar */
+/* ── Controls bar (single container, internal row separators) ──────────── */
 .nkd-bar {
   display: flex;
   flex-direction: column;
-  background: #1a1c22;
-  border-bottom: 1px solid #2a2d36;
+  background: var(--comfy-menu-bg, #1a1c22);
+  border-bottom: 1px solid var(--border-color, #2a2d36);
+  min-width: 0;
 }
 
 .nkd-row {
@@ -1207,109 +1222,164 @@ onMounted(() => {
   gap: 6px;
   flex-wrap: nowrap;
   overflow: hidden;
+  min-width: 0;
 }
 
-.nkd-row--controls { padding: 5px 7px 3px; }
-.nkd-row--presets  { padding: 2px 7px 3px; border-top: 1px solid rgba(255,255,255,0.06); }
-.nkd-row--ref      { padding: 2px 7px 3px; border-top: 1px solid rgba(255,180,60,0.12); }
-.nkd-row--hint     { padding: 2px 7px 4px; }
+.nkd-row--controls { padding: 5px 8px 3px; }
+.nkd-row--presets  { padding: 3px 8px;     border-top: 1px solid var(--border-color, rgba(255,255,255,0.06)); }
+.nkd-row--ref      { padding: 3px 8px;     border-top: 1px solid var(--nkd-ref-accent, rgba(255,180,60,0.2)); }
+.nkd-row--hint     { padding: 3px 8px 5px; }
 
 .nkd-select--preset { flex: 1 1 auto; min-width: 0; max-width: 240px; }
 .nkd-btn--preset    { padding: 2px 8px; }
 
 .nkd-label {
-  font-size: 11px;
-  color: rgba(255,255,255,0.45);
+  font-size: 10px;
+  color: var(--descrip-text, rgba(255,255,255,0.45));
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
+/* ── Select (themed to ComfyUI) ─────────────────────────────────────────── */
 .nkd-select {
   font-size: 11px;
-  background: #252830;
-  border: 1px solid #3a3d46;
-  color: #c8d0e0;
-  border-radius: 4px;
-  padding: 2px 5px;
+  background: var(--comfy-input-bg, #252830);
+  border: 1px solid var(--border-color, #3a3d46);
+  color: var(--input-text, #c8d0e0);
+  border-radius: 5px;
+  padding: 2px 6px;
   cursor: pointer;
   outline: none;
+  transition: border-color 0.12s;
 }
-.nkd-select:focus { border-color: #4ab4ff; }
+.nkd-select:hover,
+.nkd-select:focus { border-color: var(--p-primary-color, #4ab4ff); }
 
 .nkd-divider {
   width: 1px; height: 14px;
-  background: rgba(255,255,255,0.12);
-  margin: 0 1px;
+  background: var(--border-color, rgba(255,255,255,0.12));
+  margin: 0 2px;
+  flex-shrink: 0;
 }
 
 .nkd-group {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+  min-width: 0;
 }
 
+/* ── Slider (matches .rl-range / .lb-range in the other NKD nodes) ──────── */
 .nkd-slider {
-  width: 72px;
-  height: 4px;
+  width: 80px;
+  height: 14px;
+  margin: 0;
+  background: transparent;
   cursor: pointer;
-  accent-color: #4ab4ff;
+  flex-shrink: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.nkd-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--p-primary-color, #4ab4ff) 0 var(--nkd-fill, 0%),
+    var(--comfy-input-bg, #252830) var(--nkd-fill, 0%) 100%
+  );
+}
+.nkd-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -4px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--fg-color, #e5e7eb);
+  border: 1px solid var(--border-color, #1f2937);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.nkd-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--comfy-input-bg, #252830);
+}
+.nkd-slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--p-primary-color, #4ab4ff);
+}
+.nkd-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--fg-color, #e5e7eb);
+  border: 1px solid var(--border-color, #1f2937);
 }
 
 .nkd-mono {
   font-size: 10px;
   font-family: monospace;
-  color: #aac;
+  color: var(--fg-color, #cbd5e1);
   min-width: 28px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
 .nkd-spacer { flex: 1; min-width: 4px; }
 
-/* ── Unified button base ── */
+/* ── Unified button (matches .rl-btn) ───────────────────────────────────── */
 .nkd-btn {
   font-size: 11px;
-  font-family: sans-serif;
-  background: #252830;
-  border: 1px solid #3a3d46;
-  color: rgba(255,255,255,0.55);
-  border-radius: 4px;
-  padding: 1px 7px;
+  font-family: var(--font-family, sans-serif);
+  background: var(--comfy-input-bg, #252830);
+  border: 1px solid var(--border-color, #3a3d46);
+  color: var(--input-text, rgba(255,255,255,0.65));
+  border-radius: 5px;
+  padding: 2px 8px;
   cursor: pointer;
   line-height: 1.5;
   white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
 .nkd-btn:hover:not(:disabled) {
-  border-color: #4ab4ff;
-  color: rgba(255,255,255,0.85);
+  border-color: var(--p-primary-color, #4ab4ff);
+  color: var(--fg-color, rgba(255,255,255,0.95));
 }
 .nkd-btn--active {
-  border-color: #4ab4ff;
-  color: #4ab4ff;
+  border-color: var(--p-primary-color, #4ab4ff);
+  color: var(--p-primary-color, #4ab4ff);
 }
 .nkd-btn:disabled,
 .nkd-btn--disabled {
-  opacity: 0.3;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
-/* Reference-row buttons use amber accent instead of blue */
+/* Reference-row buttons keep the semantic amber accent */
 .nkd-btn--ref:hover:not(:disabled) {
-  border-color: #ffb43c;
-  color: rgba(255,255,255,0.85);
+  border-color: var(--nkd-ref-accent, #ffb43c);
+  color: var(--fg-color, rgba(255,255,255,0.95));
 }
 .nkd-btn--ref-active {
-  border-color: #ffb43c;
-  color: #ffb43c;
+  border-color: var(--nkd-ref-accent, #ffb43c);
+  color: var(--nkd-ref-accent, #ffb43c);
 }
 
 .nkd-info {
   font-size: 10px;
   font-family: monospace;
-  color: rgba(180,210,255,0.65);
+  color: var(--descrip-text, rgba(180,210,255,0.65));
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .nkd-hint {
   font-size: 9.5px;
-  color: rgba(255,255,255,0.22);
+  color: var(--descrip-text, rgba(255,255,255,0.32));
+  opacity: 0.7;
 }
 
 /* Canvas */
@@ -1318,6 +1388,6 @@ onMounted(() => {
   width: 100%;
   height: auto;
   cursor: crosshair;
-  background: #111318;
+  background: var(--comfy-input-bg, #111318);
 }
 </style>
