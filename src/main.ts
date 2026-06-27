@@ -205,6 +205,9 @@ comfyApp.registerExtension({
       // Start with a safe overestimate so the node is never too short before
       // the measurement fires.
       let barH = 50;
+      // Small margin so the node body reaches past the canvas — the canvas renderer
+      // reserves the widget row a touch short, which would clip the editor's bottom.
+      const ROW_SAFETY = 8;
 
       // ── Register DOM widget ──────────────────────────────────────────
       // IMPORTANT: Do NOT set domWidget.computeSize. v1's _arrangeWidgets
@@ -227,9 +230,9 @@ comfyApp.registerExtension({
           // v1 (DOMWidgetImpl.computeLayoutSize) reads these callbacks to
           // allocate vertical space. All three return the same fixed height
           // so the widget gets exactly the space it needs.
-          getMinHeight: () => Math.round((this.size?.[0] || CANVAS_W) * CANVAS_AR) + barH,
-          getMaxHeight: () => Math.round((this.size?.[0] || CANVAS_W) * CANVAS_AR) + barH,
-          getHeight:    () => Math.round((this.size?.[0] || CANVAS_W) * CANVAS_AR) + barH,
+          getMinHeight: () => Math.round((this.size?.[0] || CANVAS_W) * CANVAS_AR) + barH + ROW_SAFETY,
+          getMaxHeight: () => Math.round((this.size?.[0] || CANVAS_W) * CANVAS_AR) + barH + ROW_SAFETY,
+          getHeight:    () => Math.round((this.size?.[0] || CANVAS_W) * CANVAS_AR) + barH + ROW_SAFETY,
         }
       );
 
@@ -250,7 +253,7 @@ comfyApp.registerExtension({
         // would trigger "Cannot create property '0' on number" at LGN:1788.
         const sz: [number, number] = origComputeSize();
         const width = sz[0] || this.size[0];
-        const needed = Math.round(width * CANVAS_AR) + barH;
+        const needed = Math.round(width * CANVAS_AR) + barH + ROW_SAFETY;
         if (sz[1] < needed) sz[1] = needed;
         return sz;
       };
@@ -272,9 +275,19 @@ comfyApp.registerExtension({
       // Measure the real controls-bar height after the DOM is rendered, update
       // barH (both closures above already reference it), then force the node to
       // adopt the corrected size so the border always wraps the content.
+      //
+      // Use offsetHeight, NOT getBoundingClientRect().height. The latter is in
+      // screen space and therefore includes the LiteGraph canvas zoom transform
+      // (the CSS `transform: scale()` ComfyUI applies to DOM widgets), while
+      // this.size / computeSize / getHeight all work in unzoomed graph units.
+      // Mixing the two scaled barH by the zoom level, which (a) left an abrupt
+      // empty margin under the canvas at scale > 1, and (b) made the node jump
+      // while corner-resizing because the ceil() of the fractional scaled height
+      // flipped ±1px each reflow, re-triggering setSize → ResizeObserver. The
+      // border-box offsetHeight is an integer and transform-independent.
       const remeasureBar = () => {
         const barEl = container.querySelector(".nkd-bar") as HTMLElement | null;
-        const measured = barEl ? Math.ceil(barEl.getBoundingClientRect().height) : 0;
+        const measured = barEl ? barEl.offsetHeight : 0;
         if (measured > 0 && measured !== barH) {
           barH = measured;
           const sz = this.computeSize(this.size[0]);

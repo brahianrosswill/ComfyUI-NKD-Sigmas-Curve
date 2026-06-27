@@ -7589,6 +7589,7 @@ app.registerExtension({
       const CANVAS_H = 200;
       const CANVAS_AR = CANVAS_H / CANVAS_W;
       let barH = 50;
+      const ROW_SAFETY = 8;
       this.addDOMWidget(
         "sigma_curve_editor",
         "CURVE_EDITOR",
@@ -7606,15 +7607,15 @@ app.registerExtension({
           // so the widget gets exactly the space it needs.
           getMinHeight: () => {
             var _a2;
-            return Math.round((((_a2 = this.size) == null ? void 0 : _a2[0]) || CANVAS_W) * CANVAS_AR) + barH;
+            return Math.round((((_a2 = this.size) == null ? void 0 : _a2[0]) || CANVAS_W) * CANVAS_AR) + barH + ROW_SAFETY;
           },
           getMaxHeight: () => {
             var _a2;
-            return Math.round((((_a2 = this.size) == null ? void 0 : _a2[0]) || CANVAS_W) * CANVAS_AR) + barH;
+            return Math.round((((_a2 = this.size) == null ? void 0 : _a2[0]) || CANVAS_W) * CANVAS_AR) + barH + ROW_SAFETY;
           },
           getHeight: () => {
             var _a2;
-            return Math.round((((_a2 = this.size) == null ? void 0 : _a2[0]) || CANVAS_W) * CANVAS_AR) + barH;
+            return Math.round((((_a2 = this.size) == null ? void 0 : _a2[0]) || CANVAS_W) * CANVAS_AR) + barH + ROW_SAFETY;
           }
         }
       );
@@ -7628,7 +7629,7 @@ app.registerExtension({
       this.computeSize = function(_w) {
         const sz = origComputeSize();
         const width = sz[0] || this.size[0];
-        const needed = Math.round(width * CANVAS_AR) + barH;
+        const needed = Math.round(width * CANVAS_AR) + barH + ROW_SAFETY;
         if (sz[1] < needed) sz[1] = needed;
         return sz;
       };
@@ -7642,7 +7643,7 @@ app.registerExtension({
       };
       const remeasureBar = () => {
         const barEl = container.querySelector(".nkd-bar");
-        const measured = barEl ? Math.ceil(barEl.getBoundingClientRect().height) : 0;
+        const measured = barEl ? barEl.offsetHeight : 0;
         if (measured > 0 && measured !== barH) {
           barH = measured;
           const sz = this.computeSize(this.size[0]);
